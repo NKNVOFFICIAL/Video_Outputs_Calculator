@@ -125,24 +125,42 @@ const VC = (() => {
     return b.length < a.length ? { tiles: b, rot: true } : { tiles: a, rot: false };
   }
   // Упаковка кусков в выходы полками; каждый кусок не больше выхода.
+  /* Упаковка кусков в выходы методом MaxRects (лучшая короткая сторона).
+     Куски не поворачиваются; у повёрнутых выходов свои рамки. */
   function packPieces(pieces, cw, ch) {
-    const sorted = pieces.map((p, i) => ({ ...p, i })).sort((p, q) => q.h - p.h || q.w - p.w);
+    const sorted = pieces.map((p, i) => ({ ...p, i })).sort((p, q) => Math.max(q.w, q.h) - Math.max(p.w, p.h) || q.w * q.h - p.w * p.h);
     const bins = [];
-    for (const p of sorted) {
-      let placed = false;
-      for (const b of bins) {
-        if (b.rot !== p.rot) continue;
-        const BW = p.rot ? ch : cw, BH = p.rot ? cw : ch;
-        for (const sh of b.shelves) {
-          if (p.h <= sh.h && sh.x + p.w <= BW) { b.items.push({ ...p, ox: sh.x, oy: sh.y }); sh.x += p.w; placed = true; break; }
-        }
-        if (placed) break;
-        const top = b.shelves.reduce((m, s) => Math.max(m, s.y + s.h), 0);
-        if (top + p.h <= BH && p.w <= BW) { b.shelves.push({ y: top, h: p.h, x: p.w }); b.items.push({ ...p, ox: 0, oy: top }); placed = true; break; }
+    const place = (bin, p, r) => {
+      bin.items.push({ ...p, ox: r.x, oy: r.y });
+      const used = { x: r.x, y: r.y, w: p.w, h: p.h }, next = [];
+      for (const f of bin.free) {
+        if (used.x >= f.x + f.w || used.x + used.w <= f.x || used.y >= f.y + f.h || used.y + used.h <= f.y) { next.push(f); continue; }
+        if (used.x > f.x) next.push({ x: f.x, y: f.y, w: used.x - f.x, h: f.h });
+        if (used.x + used.w < f.x + f.w) next.push({ x: used.x + used.w, y: f.y, w: f.x + f.w - used.x - used.w, h: f.h });
+        if (used.y > f.y) next.push({ x: f.x, y: f.y, w: f.w, h: used.y - f.y });
+        if (used.y + used.h < f.y + f.h) next.push({ x: f.x, y: used.y + used.h, w: f.w, h: f.y + f.h - used.y - used.h });
       }
-      if (!placed) bins.push({ rot: p.rot, shelves: [{ y: 0, h: p.h, x: p.w }], items: [{ ...p, ox: 0, oy: 0 }] });
+      bin.free = next.filter((f, i) => !next.some((g, j) => j !== i && g.x <= f.x && g.y <= f.y && g.x + g.w >= f.x + f.w && g.y + g.h >= f.y + f.h && (j < i || g.w * g.h > f.w * f.h)));
+    };
+    for (const p of sorted) {
+      let best = null;
+      for (const bin of bins) {
+        if (bin.rot !== p.rot) continue;
+        for (const f of bin.free) {
+          if (p.w > f.w || p.h > f.h) continue;
+          const score = Math.min(f.w - p.w, f.h - p.h), score2 = Math.max(f.w - p.w, f.h - p.h);
+          if (!best || score < best.score || (score === best.score && score2 < best.score2)) best = { bin, r: f, score, score2 };
+        }
+        if (best) break; // заполняем выходы по порядку
+      }
+      if (!best) {
+        const W = p.rot ? ch : cw, H = p.rot ? cw : ch, bin = { rot: p.rot, W, H, free: [{ x: 0, y: 0, w: W, h: H }], items: [] };
+        bins.push(bin);
+        best = { bin, r: bin.free[0] };
+      }
+      place(best.bin, p, best.r);
     }
-    return bins.map((b) => ({ rot: b.rot, w: b.rot ? ch : cw, h: b.rot ? cw : ch, items: b.items, usedW: Math.max(...b.items.map((i) => i.ox + i.w)), usedH: Math.max(...b.items.map((i) => i.oy + i.h)) }));
+    return bins.map((b) => ({ rot: b.rot, w: b.W, h: b.H, items: b.items, usedW: Math.max(...b.items.map((i) => i.ox + i.w)), usedH: Math.max(...b.items.map((i) => i.oy + i.h)) }));
   }
   /* Границы занятых пикселей внутри куска. occ: {w, h, data: Uint8Array w*h (1 — занято), rows: Uint8Array h} */
   function occBBox(occ, t) {
@@ -200,9 +218,13 @@ const VC = (() => {
 
   /* --- распределение по железу --- */
   // Серверы: каждый выход занимает один физический выход сервера с подходящим разрешением.
-  function allocServers(outs, servers) {
+  const makeUnits = (servers) => {
     const units = [];
     servers.filter((s) => s.on).forEach((s) => { for (let k = 0; k < Math.max(0, s.count | 0); k++) units.push({ dev: s, idx: k + 1, free: Math.max(0, s.outs | 0), used: [] }); });
+    return units;
+  };
+  function allocServers(outs, servers, given) {
+    const units = given || makeUnits(servers);
     const fits = (u, o) => (Math.max(o.usedW, o.usedH) <= Math.max(u.dev.w, u.dev.h) && Math.min(o.usedW, o.usedH) <= Math.min(u.dev.w, u.dev.h));
     // держим выходы одного экрана на одном сервере, если влезают
     const groups = groupByFirstKey(outs);
@@ -219,22 +241,86 @@ const VC = (() => {
      disguise 4x4pro не работает вместе с vx — это разные связки. Серверы без связки
      (Resolume) независимы и добавляются к любой. Выбираем связку, при которой
      не хватает меньше всего выходов, при равенстве — где занято меньше серверов. */
-  function pickServers(outs, servers, choice) {
+  /* Связки и резерв.
+     Серверы с непустой связкой (cluster) работают только со своей связкой: disguise 4x4pro
+     не встаёт к vx. Серверы без связки (Resolume) независимы и добавляются к любой.
+     backup — сколько бэкап-серверов на каждый мейн: бэкап той же связки, не меньше выходов,
+     то же или большее разрешение выхода. Выбираем связку, где не хватает меньше всего. */
+  function pickServers(outs, servers, choice, backup = 0) {
     const live = servers.filter((s) => s.on && (s.count | 0) > 0 && (s.outs | 0) > 0);
     const clusters = [...new Set(live.map((s) => s.cluster || "").filter(Boolean))];
     const cands = choice !== "auto" && clusters.includes(choice) ? [choice] : clusters.length ? clusters : [""];
+    const run = (c) => {
+      const pool = live.filter((s) => !s.cluster || s.cluster === c);
+      outs.forEach((o) => { o.at = null; o.backups = []; });
+      const all = makeUnits(pool);
+      const mainSet = backup > 0 ? chooseMains(all, outs.length, backup) : all;
+      const units = allocServers(outs, null, mainSet);
+      if (mainSet !== all) all.forEach((u) => { if (!mainSet.includes(u)) units.push(u); });
+      let bMiss = 0;
+      if (backup > 0) {
+        const mains = units.filter((u) => u.used.length).sort((p, q) => q.used.length - p.used.length);
+        for (const m of mains) {
+          m.role = "main";
+          m.backups = [];
+          for (let k = 0; k < backup; k++) {
+            const need = m.used.length, maxW = Math.max(...m.used.map((o) => Math.max(o.usedW, o.usedH))), minS = Math.max(...m.used.map((o) => Math.min(o.usedW, o.usedH)));
+            const cand = units.filter((u) => !u.used.length && !u.role && (u.dev.outs | 0) >= need && Math.max(u.dev.w, u.dev.h) >= maxW && Math.min(u.dev.w, u.dev.h) >= minS
+              && (!m.dev.cluster ? u.dev === m.dev || u.dev.fam === m.dev.fam : u.dev.cluster === m.dev.cluster))
+              .sort((p, q) => (p.dev === m.dev ? 0 : 1) - (q.dev === m.dev ? 0 : 1) || (p.dev.outs - q.dev.outs));
+            const u = cand[0];
+            if (!u) { bMiss++; continue; }
+            u.role = "backup"; u.mainOf = m; m.backups.push(u);
+            m.used.forEach((o, i) => o.backups.push({ dev: u.dev.name, unit: u.idx, port: i + 1 }));
+          }
+        }
+      }
+      const miss = outs.filter((o) => !o.at).length, used = units.filter((u) => u.used.length || u.role === "backup").length;
+      return { c, units, miss, bMiss, used };
+    };
     let best = null;
     for (const c of cands) {
-      const pool = live.filter((s) => !s.cluster || s.cluster === c);
-      outs.forEach((o) => { o.at = null; });
-      const units = allocServers(outs, pool);
-      const miss = outs.filter((o) => !o.at).length, used = units.filter((u) => u.used.length).length;
-      if (!best || miss < best.miss || (miss === best.miss && used < best.used)) best = { c, miss, used };
+      const r = run(c);
+      const key = (x) => [x.miss + x.bMiss, x.miss, x.used];
+      if (!best || cmp(key(r), key(best)) < 0) best = r;
     }
-    const pool = live.filter((s) => !s.cluster || s.cluster === best.c);
-    outs.forEach((o) => { o.at = null; });
-    return { units: allocServers(outs, pool), cluster: best.c, clusters };
+    const fin = run(best.c);
+    return { units: fin.units, cluster: fin.c, clusters, backupMissing: fin.bMiss };
   }
+  /* Подбор мейн-серверов под резерв: перебираем, сколько серверов каждого вида взять в мейн,
+     и берём вариант, где у каждого мейна находятся бэкапы, а серверов занято меньше. */
+  function chooseMains(units, N, backup) {
+    const kind = (u) => [u.dev.fam, u.dev.cluster || "", u.dev.outs, u.dev.w, u.dev.h].join("|");
+    const types = [...units.reduce((m, u) => m.set(kind(u), [...(m.get(kind(u)) || []), u]), new Map()).values()]
+      .sort((a, b) => b[0].dev.outs - a[0].dev.outs);
+    let combos = 1;
+    for (const t of types) combos *= t.length + 1;
+    if (combos > 50000) return units;
+    let best = null;
+    const vec = new Array(types.length).fill(0);
+    const evalVec = () => {
+      const mains = types.flatMap((t, i) => t.slice(0, vec[i]));
+      const cap = mains.reduce((s, u) => s + u.dev.outs, 0);
+      if (cap < N && mains.length < units.length) { if (cap === 0) return; }
+      let left = N;
+      const loads = mains.map((u) => { const l = Math.min(u.dev.outs, left); left -= l; return l; });
+      if (loads.some((l) => l === 0)) return; // лишний мейн
+      const spare = types.flatMap((t, i) => t.slice(vec[i])).sort((a, b) => a.dev.outs - b.dev.outs);
+      let bMiss = 0;
+      mains.map((u, i) => ({ u, l: loads[i] })).sort((a, b) => b.l - a.l).forEach(({ u, l }) => {
+        for (let k = 0; k < backup; k++) {
+          const j = spare.findIndex((x) => x.dev.outs >= l && x.dev.fam === u.dev.fam && (x.dev.cluster || "") === (u.dev.cluster || ""));
+          if (j < 0) bMiss++; else spare.splice(j, 1);
+        }
+      });
+      const key = [Math.max(0, N - cap), bMiss, mains.length * (1 + backup), mains.length];
+      if (!best || cmp(key, best.key) < 0) best = { key, mains };
+    };
+    const rec = (i) => { if (i === types.length) return evalVec(); for (let k = 0; k <= types[i].length; k++) { vec[i] = k; rec(i + 1); } vec[i] = 0; };
+    rec(0);
+    return best ? best.mains : units;
+  }
+  const cmp = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
   // Процессоры: ёмкость в слотах; выход 2K стоит 1 слот, 4K — slots/max4K.
   function allocProcessors(outs, procs) {
     const units = [];
@@ -263,10 +349,10 @@ const VC = (() => {
     const srvOuts = buildOutputs(active, set.srv, { pack: set.packSrv, rot: set.rotSrv }, "server");
     const viaProc = active.filter((it) => it.viaProc && !it.proj);
     const procOuts = buildOutputs(viaProc, set.proc, { pack: set.packProc, rot: set.rotProc }, "proc");
-    const pick = pickServers(srvOuts, inv.servers, set.cluster || "auto");
+    const pick = pickServers(srvOuts, inv.servers, set.cluster || "auto", set.backup | 0);
     const srvUnits = pick.units;
     const procUnits = allocProcessors(procOuts, inv.procs);
-    return { active, srvOuts, procOuts, srvUnits, procUnits, cluster: pick.cluster, clusters: pick.clusters,
+    return { active, srvOuts, procOuts, srvUnits, procUnits, cluster: pick.cluster, clusters: pick.clusters, backup: set.backup | 0, backupMissing: pick.backupMissing,
       srvMissing: srvOuts.filter((o) => !o.at).length, procMissing: procOuts.filter((o) => !o.at).length,
       pixels: active.reduce((s, it) => s + it.w * it.h, 0) };
   }

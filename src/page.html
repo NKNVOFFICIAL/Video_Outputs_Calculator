@@ -161,6 +161,8 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
         <h2 id="hSet">Форматы выходов</h2>
         <div class="set-row"><span class="lbl">Серверы</span><div class="seg" id="famSeg" role="group" aria-label="Какие медиасерверы">
           <button data-v="disguise">disguise</button><button data-v="resolume">Resolume</button><button data-v="all">Все</button></div></div>
+        <div class="set-row"><span class="lbl">Резерв серверов</span><div class="seg" id="bkSeg" role="group" aria-label="Бэкап-серверы">
+          <button data-v="0">Без бэкапа</button><button data-v="1">+1 бэкап</button><button data-v="2">+2 бэкапа</button></div></div>
         <div class="set-row"><span class="lbl">Связка серверов</span><div>
           <select id="cluster" aria-label="Связка серверов"></select></div></div>
         <div class="set-row"><span class="lbl">Выход сервера</span><div>
@@ -234,7 +236,7 @@ const PROC_FMTS = [["2K 1920×1080", 1920, 1080], ["2K 2048×1200 (E2)", 2048, 1
 
 /* состояние */
 let inv = migrateInv(lsGet("vcalc.inv") || clone(DEFAULT_INV));
-const set = Object.assign({ cluster: "auto", fam: "all", srvFmt: 0, srvW: 3840, srvH: 2160, procFmt: 0, procW: 1920, procH: 1080, packSrv: true, packProc: false, rotSrv: false, rotProc: false }, lsGet("vcalc.set") || {});
+const set = Object.assign({ backup: 0, cluster: "auto", fam: "all", srvFmt: 0, srvW: 3840, srvH: 2160, procFmt: 0, procW: 1920, procH: 1080, packSrv: true, packProc: false, rotSrv: false, rotProc: false }, lsGet("vcalc.set") || {});
 let project = { name: "", example: true, items: [] };
 
 function sampleProject() {
@@ -292,6 +294,7 @@ function syncSettings() {
   for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).value = set[k];
   for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).checked = !!set[k];
   document.querySelectorAll("#famSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === set.fam)));
+  document.querySelectorAll("#bkSeg button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.v === (set.backup | 0))));
   const cl = [...new Set(inv.servers.filter((x) => x.on && x.cluster && (set.fam === "all" || x.fam === set.fam)).map((x) => x.cluster))];
   if (set.cluster !== "auto" && !cl.includes(set.cluster)) set.cluster = "auto";
   $("cluster").innerHTML = '<option value="auto">Авто — где хватает выходов</option>' + cl.map((c) => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
@@ -304,6 +307,7 @@ function bindSettings() {
   for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).onchange = (e) => { set[k] = Math.max(16, Math.min(8192, VC.pint(e.target.value, set[k]))); render(); };
   for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).onchange = (e) => { set[k] = e.target.checked; render(); };
   document.querySelectorAll("#famSeg button").forEach((b) => b.onclick = () => { set.fam = b.dataset.v; render(); });
+  document.querySelectorAll("#bkSeg button").forEach((b) => b.onclick = () => { set.backup = +b.dataset.v; render(); });
 }
 
 /* парк */
@@ -358,14 +362,14 @@ function render(redrawInv = true) {
   if (redrawInv) renderInventory();
   const srv = fmtOf(SRV_FMTS, set.srvFmt, set.srvW, set.srvH), proc = fmtOf(PROC_FMTS, set.procFmt, set.procW, set.procH);
   const servers = inv.servers.filter((s) => set.fam === "all" || s.fam === set.fam);
-  const r = VC.calculate(project.items, { srv, proc, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
+  const r = VC.calculate(project.items, { srv, proc, backup: set.backup | 0, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
   last = { r, srv, proc };
   renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderPack(r); renderOuts(r);
 }
 
-function stat(title, need, have, unit, missing, extra) {
-  const cls = need === 0 ? "idle" : missing ? "bad" : "ok";
-  const pill = need === 0 ? "не нужны" : missing ? "не хватает " + missing : "хватает";
+function stat(title, need, have, unit, missing, extra, warn) {
+  const cls = need === 0 ? "idle" : missing || warn ? "bad" : "ok";
+  const pill = need === 0 ? "не нужны" : missing ? "не хватает " + missing : warn ? "не хватает бэкапа" : "хватает";
   return '<div class="stat ' + cls + '"><h2>' + title + '</h2><div class="big">' + need + " <small>" + unit + " из " + have + '</small></div><span class="pill ' + cls + '">' + pill + "</span>" + (extra ? '<span class="hint">' + extra + "</span>" : "") + "</div>";
 }
 function renderSummary(r) {
@@ -375,18 +379,22 @@ function renderSummary(r) {
   const procBoxes = r.procUnits.filter((u) => u.used.length).length;
   const n4 = r.procOuts.filter((o) => o.big).length;
   $("summary").innerHTML =
-    stat("Выходы серверов", r.srvOuts.length, srvHave, "вых.", r.srvMissing, "серверов в работе: " + srvBoxes + (r.cluster ? " · связка: " + esc(r.cluster) : "")) +
+    stat("Выходы серверов", r.srvOuts.length, srvHave, "вых.", r.srvMissing + (r.backupMissing ? 0 : 0),
+      (r.backup ? "мейн: " + srvBoxes + " · бэкап: " + r.srvUnits.filter((u) => u.role === "backup").length + (r.backupMissing ? ' · <b style="color:var(--bad)">нет бэкапа: ' + r.backupMissing + "</b>" : "") : "серверов в работе: " + srvBoxes) + (r.cluster ? " · связка: " + esc(r.cluster) : ""), r.backupMissing) +
     stat("Выходы процессоров", r.procOuts.length, procHave, "вых. 2K", r.procMissing, "из них 4K: " + n4 + " · процессоров: " + procBoxes) +
     '<div class="stat idle"><h2>Пикселей в ТЗ</h2><div class="big">' + (r.pixels / 1e6).toFixed(2) + ' <small>Мп</small></div><span class="hint">экранов: ' + r.active.length + "</span></div>";
 }
 function renderUsage(r) {
   const rows = [];
-  const add = (u, cap, used, unit) => {
+  const add = (u, cap, used, unit, role) => {
     const pct = cap > 0 ? Math.min(100, used / cap * 100) : 0;
-    rows.push('<div class="u-row"><span class="nm" title="' + esc(u.dev.name) + '">' + esc(u.dev.name) + (u.dev.count > 1 ? " #" + u.idx : "") + '</span><div class="bar"><i class="' + (pct >= 99.9 ? "full" : "") + '" style="width:' + pct + '%"></i></div><span class="num">' + fmtN(used) + " / " + cap + unit + "</span></div>");
+    rows.push('<div class="u-row"><span class="nm" title="' + esc(u.dev.name) + '">' + esc(u.dev.name) + (u.dev.count > 1 ? " #" + u.idx : "") + (role ? ' <span class="tag' + (role === "бэкап" ? " proj" : "") + '">' + role + "</span>" : "") + '</span><div class="bar"><i class="' + (pct >= 99.9 ? "full" : "") + '" style="width:' + pct + '%"></i></div><span class="num">' + fmtN(used) + " / " + cap + unit + "</span></div>");
   };
   r.procUnits.filter((u) => u.used.length).forEach((u) => add(u, u.dev.max2k, u.dev.max2k - u.free, " 2K"));
-  r.srvUnits.filter((u) => u.used.length).forEach((u) => add(u, u.dev.outs, u.used.length, ""));
+  r.srvUnits.filter((u) => u.used.length).forEach((u) => {
+    add(u, u.dev.outs, u.used.length, "", u.role === "main" ? "мейн" : "");
+    (u.backups || []).forEach((b) => add(b, b.dev.outs, u.used.length, "", "бэкап"));
+  });
   $("usage").innerHTML = rows.length ? rows.join("") : '<p class="hint">Отметьте хотя бы один экран.</p>';
 }
 const fmtN = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1));
@@ -414,9 +422,14 @@ function renderItems(r) {
     '<div class="diagrams">' + diagram(it, r.srvOuts, it.proj ? "Сервер · по проектору на выход" : "Сервер") +
     (it.viaProc && !it.proj ? diagram(it, r.procOuts, "Процессор") : "") + "</div></div>").join("");
 }
+function bkText(o, kind, sep) {
+  if (kind === "proc" || !last || !last.r.backup) return "";
+  const b = o.backups || [];
+  return sep + (b.length ? "бэкап: " + b.map((x) => esc(x.dev) + (countOf(x.dev, kind) > 1 ? " #" + x.unit : "") + " · вых. " + x.port).join(", ") : '<span class="miss">бэкапа нет</span>');
+}
 function outRows(outs, kind) {
   return outs.map((o) => {
-    const where = o.at ? esc(o.at.dev) + (o.at.unit > 1 || countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · выход " + o.at.port : '<span class="miss">не хватает</span>';
+    const where = (o.at ? esc(o.at.dev) + (o.at.unit > 1 || countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · выход " + o.at.port : '<span class="miss">не хватает</span>') + bkText(o, kind, "<br>");
     const what = o.items.map((p) => esc(p.name) + (p.label ? " " + p.label : "") + ' <span class="mono">' + p.w + "×" + p.h + " @ " + p.x + "," + p.y + "</span>").join("<br>");
     const fmt = kind === "proc" ? (o.big ? "4K" : "2K") : "";
     return '<tr><td class="num"><span class="sw" style="background:' + tone(o.n) + '"></span>' + (kind === "proc" ? "П" : "С") + o.n + "</td><td>" + where + '</td><td class="num mono">' + o.usedW + "×" + o.usedH + (o.rot ? " ↻" : "") + (fmt ? " · " + fmt : "") + "</td><td>" + what + "</td></tr>";
@@ -443,9 +456,9 @@ function outCard(o, kind, byKey) {
     }
   }
   g += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="none" stroke="var(--ink)" stroke-width="' + sw + '"/>';
-  const where = o.at ? esc(o.at.dev) + (countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · вых. " + o.at.port : "не хватает";
+  const where = (o.at ? esc(o.at.dev) + (countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · вых. " + o.at.port : "не хватает") + bkText(o, kind, " · ");
   const fill = Math.round(o.items.reduce((s, p) => s + p.w * p.h, 0) / (W * H) * 100);
-  return '<div class="oc' + (o.at ? "" : " miss") + '"><div class="t"><b>' + (kind === "proc" ? "П" : "С") + o.n + '</b><span title="' + where + '">' + where + "</span></div>" +
+  return '<div class="oc' + (o.at ? "" : " miss") + '"><div class="t"><b>' + (kind === "proc" ? "П" : "С") + o.n + '</b><span title="' + where.replace(/<[^>]+>/g, "") + '">' + where + "</span></div>" +
     '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Выход ' + o.n + '">' + g + "</svg>" +
     '<span class="f">' + W + "×" + H + (o.rot ? " ↻" : "") + (kind === "proc" ? (o.big ? " · 4K" : " · 2K") : "") + " · занято " + fill + "%</span></div>";
 }
@@ -474,7 +487,7 @@ function summaryText() {
   L.push("Процессоры: " + r.procOuts.length + " вых." + (r.procMissing ? " (не хватает " + r.procMissing + ")" : ""));
   r.procOuts.forEach((o) => L.push("  П" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
   L.push("Серверы" + (r.cluster ? " (связка " + r.cluster + ")" : "") + ": " + r.srvOuts.length + " вых." + (r.srvMissing ? " (не хватает " + r.srvMissing + ")" : ""));
-  r.srvOuts.forEach((o) => L.push("  С" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + (p.label ? " " + p.label : "") + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
+  r.srvOuts.forEach((o) => L.push("  С" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + (r.backup ? " | бэкап: " + ((o.backups || []).map((x) => x.dev + " #" + x.unit + " вых." + x.port).join(", ") || "НЕТ") : "") + " — " + o.items.map((p) => p.name + (p.label ? " " + p.label : "") + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
   return L.join("\n");
 }
 let toastT = 0;
