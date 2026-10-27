@@ -103,6 +103,16 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; m
 .dg .cap { font-size: 12px; color: var(--muted); }
 .dg svg { width: 100%; height: auto; max-height: 240px; display: block; background: var(--sunk); border-radius: 4px; }
 .dg svg text { font-family: var(--f-mono); }
+/* выходы: что внутри */
+.obox { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.oc { display: grid; gap: 5px; min-width: 0; }
+.oc .t { display: flex; gap: 6px; align-items: baseline; justify-content: space-between; font-size: 12px; }
+.oc .t b { font-family: var(--f-mono); font-weight: 600; }
+.oc .t span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc svg { width: 100%; height: auto; display: block; border-radius: 3px; }
+.oc svg text { font-family: var(--f-mono); }
+.oc .f { font-size: 11px; color: var(--muted); font-family: var(--f-mono); }
+.oc.miss .t b { color: var(--bad); }
 /* таблица выходов */
 .tbl-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
@@ -184,6 +194,12 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
       <section class="panel" aria-labelledby="hItems">
         <h2 id="hItems">Нарезка экранов</h2>
         <div class="items" id="items"></div>
+      </section>
+      <section class="panel" aria-labelledby="hPack">
+        <div class="item-h"><h2 id="hPack">Выходы: что внутри</h2><div class="seg" id="packSeg" role="group" aria-label="Какие выходы показать">
+          <button data-v="srv">Серверы</button><button data-v="proc">Процессоры</button></div></div>
+        <div class="obox" id="obox"></div>
+        <p class="hint">Каждая рамка — выход в своём разрешении. Внутри — куски экранов на тех местах, где они стоят в выходе; пустое место выхода заштриховано.</p>
       </section>
       <section class="panel" aria-labelledby="hOuts">
         <h2 id="hOuts">Карта выходов</h2>
@@ -671,7 +687,7 @@ function render(redrawInv = true) {
   const servers = inv.servers.filter((s) => set.fam === "all" || s.fam === set.fam);
   const r = VC.calculate(project.items, { srv, proc, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
   last = { r, srv, proc };
-  renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderOuts(r);
+  renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderPack(r); renderOuts(r);
 }
 
 function stat(title, need, have, unit, missing, extra) {
@@ -734,6 +750,40 @@ function outRows(outs, kind) {
   }).join("");
 }
 function countOf(name, kind) { const list = kind === "proc" ? inv.procs : inv.servers; const d = list.find((x) => x.name === name); return d ? d.count : 1; }
+/* Рамка выхода с кусками экранов внутри */
+let packView = "srv";
+function outCard(o, kind, byKey) {
+  const W = o.w, H = o.h, sw = Math.max(W, H) / 220, fs = Math.max(W, H) / 22;
+  const hid = "h" + kind + o.n;
+  let g = '<defs><pattern id="' + hid + '" width="' + fs + '" height="' + fs + '" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="' + fs + '" height="' + fs + '" fill="var(--sunk)"/><line x1="0" y1="0" x2="0" y2="' + fs + '" stroke="var(--line)" stroke-width="' + fs / 4 + '"/></pattern></defs>' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + hid + ')"/>';
+  for (const p of o.items) {
+    const it = byKey.get(p.key);
+    if (it && it.thumb) g += '<svg x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" viewBox="' + p.x + " " + p.y + " " + p.w + " " + p.h + '" preserveAspectRatio="none"><image href="' + it.thumb + '" x="0" y="0" width="' + it.w + '" height="' + it.h + '" preserveAspectRatio="none"/></svg>';
+    else g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="' + tone(o.n) + '" fill-opacity="0.35"/>';
+    g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="none" stroke="' + tone(o.n) + '" stroke-width="' + sw * 2 + '"/>';
+    const t = Math.min(fs, p.h / 3.2, p.w / 9);
+    if (t > fs / 6) {
+      const cx = p.ox + p.w / 2, cy = p.oy + p.h / 2;
+      g += '<text x="' + cx + '" y="' + (cy - t * 0.6) + '" font-size="' + t + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 6 + '" paint-order="stroke" font-weight="600">' + esc(p.name + (p.label ? " " + p.label : "")) + "</text>" +
+        '<text x="' + cx + '" y="' + (cy + t * 0.6) + '" font-size="' + t * 0.8 + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 7 + '" paint-order="stroke">' + p.w + "×" + p.h + " · " + p.x + "," + p.y + "</text>";
+    }
+  }
+  g += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="none" stroke="var(--ink)" stroke-width="' + sw + '"/>';
+  const where = o.at ? esc(o.at.dev) + (countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · вых. " + o.at.port : "не хватает";
+  const fill = Math.round(o.items.reduce((s, p) => s + p.w * p.h, 0) / (W * H) * 100);
+  return '<div class="oc' + (o.at ? "" : " miss") + '"><div class="t"><b>' + (kind === "proc" ? "П" : "С") + o.n + '</b><span title="' + where + '">' + where + "</span></div>" +
+    '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Выход ' + o.n + '">' + g + "</svg>" +
+    '<span class="f">' + W + "×" + H + (o.rot ? " ↻" : "") + (kind === "proc" ? (o.big ? " · 4K" : " · 2K") : "") + " · занято " + fill + "%</span></div>";
+}
+function renderPack(r) {
+  const has = { proc: r.procOuts.length > 0, srv: r.srvOuts.length > 0 };
+  if (!has[packView]) packView = has.proc ? "proc" : "srv";
+  document.querySelectorAll("#packSeg button").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.v === packView)); b.disabled = !has[b.dataset.v]; });
+  const outs = packView === "proc" ? r.procOuts : r.srvOuts, byKey = new Map(project.items.map((it) => [it.key, it]));
+  $("obox").innerHTML = outs.length ? outs.map((o) => outCard(o, packView, byKey)).join("") : '<p class="hint">Нет выходов.</p>';
+}
+document.querySelectorAll("#packSeg button").forEach((b) => b.onclick = () => { packView = b.dataset.v; renderPack(last.r); });
 function renderOuts(r) {
   $("outs").innerHTML = "<thead><tr><th>№</th><th>Устройство</th><th>Занято</th><th>Что на выходе (кусок экрана @ x,y)</th></tr></thead><tbody>" +
     (r.procOuts.length ? '<tr><td colspan="4"><h3>Процессоры → LED</h3></td></tr>' + outRows(r.procOuts, "proc") : "") +
