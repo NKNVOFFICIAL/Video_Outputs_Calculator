@@ -4,13 +4,13 @@ function resolumeServer(name, gpu1, gpu2, note, on = true) {
   const g = GPU_OUTS[String(gpu1)] || 0;
   // Без второй карты один выход основной карты занят мониторами оператора.
   const outs = gpu1 ? (gpu2 ? g : Math.max(0, g - 1)) : 0;
-  return { fam: "resolume", name, gpu1: gpu1 ? String(gpu1) : "", gpu2: gpu2 ? String(gpu2) : "", count: 1, outs, w: 3840, h: 2160, on: on && outs > 0, note: note || "" };
+  return { fam: "resolume", cluster: "", name, gpu1: gpu1 ? String(gpu1) : "", gpu2: gpu2 ? String(gpu2) : "", count: 1, outs, w: 3840, h: 2160, on: on && outs > 0, note: note || "" };
 }
 const DEFAULT_INV = {
   servers: [
-    { fam: "disguise", name: "disguise vx 4", count: 2, outs: 4, w: 3840, h: 2160, on: true, note: "4 выхода 4K на VFC (HDMI 2.0)" },
-    { fam: "disguise", name: "disguise vx 2", count: 2, outs: 2, w: 3840, h: 2160, on: true, note: "2 выхода 4K на VFC (HDMI 2.0)" },
-    { fam: "disguise", name: "disguise 4x4pro", count: 1, outs: 4, w: 3840, h: 2160, on: true, note: "4 × DP 1.2, 4K только 30 Гц" },
+    { fam: "disguise", cluster: "disguise vx", name: "disguise vx 4", count: 2, outs: 4, w: 3840, h: 2160, on: true, note: "4 выхода 4K на VFC (HDMI 2.0)" },
+    { fam: "disguise", cluster: "disguise vx", name: "disguise vx 2", count: 2, outs: 2, w: 3840, h: 2160, on: true, note: "2 выхода 4K на VFC (HDMI 2.0)" },
+    { fam: "disguise", cluster: "disguise 4x4", name: "disguise 4x4pro", count: 1, outs: 4, w: 3840, h: 2160, on: true, note: "4 × DP 1.2, 4K только 30 Гц; не работает в связке с vx" },
     resolumeServer("Resolume А4000 (0)", "A4000", ""),
     ...Array.from({ length: 10 }, (_, i) => resolumeServer("Resolume 3080 (" + (i + 1) + ")", "3080", "")),
     resolumeServer("Resolume А6000 (11)", "A6000", "T1000"),
@@ -38,3 +38,8 @@ const DEFAULT_INV = {
     { name: "Magnimage 4000", count: 1, max2k: 4, max4k: 2, maxW: 3840, on: true, note: "4 × Full HD или 2 × 4K, не одновременно" },
   ],
 };
+/* Старый сохранённый парк без связок: дописываем по умолчанию */
+function migrateInv(inv) {
+  for (const s of inv.servers || []) if (s.cluster == null) s.cluster = s.fam === "disguise" ? (/4x4/i.test(s.name) ? "disguise 4x4" : "disguise vx") : "";
+  return inv;
+}

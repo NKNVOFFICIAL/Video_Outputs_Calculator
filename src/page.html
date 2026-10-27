@@ -151,6 +151,8 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
         <h2 id="hSet">Форматы выходов</h2>
         <div class="set-row"><span class="lbl">Серверы</span><div class="seg" id="famSeg" role="group" aria-label="Какие медиасерверы">
           <button data-v="disguise">disguise</button><button data-v="resolume">Resolume</button><button data-v="all">Все</button></div></div>
+        <div class="set-row"><span class="lbl">Связка серверов</span><div>
+          <select id="cluster" aria-label="Связка серверов"></select></div></div>
         <div class="set-row"><span class="lbl">Выход сервера</span><div>
           <select id="srvFmt" aria-label="Разрешение выхода сервера"></select>
           <span id="srvCustom"><input type="number" id="srvW" min="16" max="8192" aria-label="Ширина"> × <input type="number" id="srvH" min="16" max="8192" aria-label="Высота"></span></div></div>
@@ -163,7 +165,7 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
         <div class="set-row"><span class="lbl">Поворот 90°</span><div>
           <label class="chk"><input type="checkbox" id="rotSrv"> сервер</label>
           <label class="chk"><input type="checkbox" id="rotProc"> процессор</label></div></div>
-        <p class="hint">Упаковка собирает краевые куски разных экранов на одном выходе. Поворот разрешает выход в портретной ориентации, если так выходов меньше. Выход процессора до 2048×1200 считается как 2K, больше — как 4K.</p>
+        <p class="hint">Серверы из разных связок вместе не работают: disguise 4x4pro не встаёт в связку с vx. Калькулятор берёт одну связку disguise; серверы Resolume независимы и добавляются к любой. Упаковка собирает краевые куски разных экранов на одном выходе. Поворот разрешает выход в портретной ориентации, если так выходов меньше. Выход процессора до 2048×1200 считается как 2K, больше — как 4K.</p>
       </section>
     </div>
 
@@ -191,7 +193,7 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
         <div class="tbl-wrap"><table id="invProc"></table></div>
         <div class="tbl-wrap"><table id="invSrv"></table></div>
         <div class="tools"><button class="btn sm" id="invReset">Вернуть парк по умолчанию</button></div>
-        <p class="hint">Resolume: у сервера без второй видеокарты один выход отдан под мониторы оператора. Характеристики disguise, Barco и PixelHue — из документации производителей; у Gen 1 учтена сгоревшая VPU.</p>
+        <p class="hint">Связка: серверы с одинаковой связкой работают вместе, с разной — нет; пустая связка — независимый сервер. Resolume: у сервера без второй видеокарты один выход отдан под мониторы оператора. Характеристики disguise, Barco и PixelHue — из документации производителей; у Gen 1 учтена сгоревшая VPU.</p>
       </div>
     </details>
   </section>
@@ -215,8 +217,8 @@ const SRV_FMTS = [["4K UHD 3840×2160", 3840, 2160], ["4K DCI 4096×2160", 4096,
 const PROC_FMTS = [["2K 1920×1080", 1920, 1080], ["2K 2048×1200 (E2)", 2048, 1200], ["4K UHD 3840×2160", 3840, 2160], ["4K 4096×2160", 4096, 2160], ["Своё", 0, 0]];
 
 /* состояние */
-let inv = lsGet("vcalc.inv") || clone(DEFAULT_INV);
-const set = Object.assign({ fam: "all", srvFmt: 0, srvW: 3840, srvH: 2160, procFmt: 0, procW: 1920, procH: 1080, packSrv: true, packProc: false, rotSrv: false, rotProc: false }, lsGet("vcalc.set") || {});
+let inv = migrateInv(lsGet("vcalc.inv") || clone(DEFAULT_INV));
+const set = Object.assign({ cluster: "auto", fam: "all", srvFmt: 0, srvW: 3840, srvH: 2160, procFmt: 0, procW: 1920, procH: 1080, packSrv: true, packProc: false, rotSrv: false, rotProc: false }, lsGet("vcalc.set") || {});
 let project = { name: "", example: true, items: [] };
 
 function sampleProject() {
@@ -274,9 +276,14 @@ function syncSettings() {
   for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).value = set[k];
   for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).checked = !!set[k];
   document.querySelectorAll("#famSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === set.fam)));
+  const cl = [...new Set(inv.servers.filter((x) => x.on && x.cluster && (set.fam === "all" || x.fam === set.fam)).map((x) => x.cluster))];
+  if (set.cluster !== "auto" && !cl.includes(set.cluster)) set.cluster = "auto";
+  $("cluster").innerHTML = '<option value="auto">Авто — где хватает выходов</option>' + cl.map((c) => '<option value="' + esc(c) + '">' + esc(c) + "</option>").join("");
+  $("cluster").value = set.cluster;
 }
 function bindSettings() {
   $("srvFmt").onchange = (e) => { set.srvFmt = +e.target.value; render(); };
+  $("cluster").onchange = (e) => { set.cluster = e.target.value; render(); };
   $("procFmt").onchange = (e) => { set.procFmt = +e.target.value; render(); };
   for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).onchange = (e) => { set[k] = Math.max(16, Math.min(8192, VC.pint(e.target.value, set[k]))); render(); };
   for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).onchange = (e) => { set[k] = e.target.checked; render(); };
@@ -303,9 +310,10 @@ function renderInventory() {
     $("pMW" + i).onchange = (e) => { d.maxW = Math.max(16, VC.pint(e.target.value, d.maxW)); saveInv(); };
   });
   const s = $("invSrv");
-  s.innerHTML = "<thead><tr><th>В работе</th><th>Медиасервер</th><th>Видеокарты</th><th>Шт.</th><th>Выходов</th><th>Макс. выход</th><th>Примечание</th></tr></thead><tbody>" +
+  s.innerHTML = "<thead><tr><th>В работе</th><th>Медиасервер</th><th>Связка</th><th>Видеокарты</th><th>Шт.</th><th>Выходов</th><th>Макс. выход</th><th>Примечание</th></tr></thead><tbody>" +
     inv.servers.map((d, i) => '<tr><td><input type="checkbox" id="sOn' + i + '" ' + (d.on ? "checked" : "") + ' aria-label="В работе"></td>' +
       '<td><input type="text" id="sNm' + i + '" value="' + esc(d.name) + '" aria-label="Название"><div class="fam">' + (d.fam === "resolume" ? "Resolume" : "disguise") + "</div></td>" +
+      '<td><input type="text" id="sCl' + i + '" value="' + esc(d.cluster || "") + '" placeholder="независимый" aria-label="Связка" style="min-width:120px"></td>' +
       '<td class="mono">' + esc([d.gpu1, d.gpu2].filter(Boolean).join(" + ") || "—") + "</td>" +
       '<td><input type="number" id="sCt' + i + '" min="0" max="99" value="' + d.count + '" aria-label="Количество"></td>' +
       '<td><input type="number" id="sOut' + i + '" min="0" max="16" value="' + d.outs + '" aria-label="Выходов под контент"></td>' +
@@ -314,6 +322,7 @@ function renderInventory() {
   inv.servers.forEach((d, i) => {
     $("sOn" + i).onchange = (e) => { d.on = e.target.checked; saveInv(); };
     $("sNm" + i).onchange = (e) => { d.name = e.target.value || d.name; saveInv(); };
+    $("sCl" + i).onchange = (e) => { d.cluster = e.target.value.trim(); saveInv(); };
     $("sCt" + i).onchange = (e) => { d.count = Math.max(0, VC.pint(e.target.value, d.count)); saveInv(); };
     $("sOut" + i).onchange = (e) => { d.outs = Math.max(0, VC.pint(e.target.value, d.outs)); saveInv(); };
     $("sW" + i).onchange = (e) => { d.w = Math.max(16, VC.pint(e.target.value, d.w)); saveInv(); };
@@ -333,7 +342,7 @@ function render(redrawInv = true) {
   if (redrawInv) renderInventory();
   const srv = fmtOf(SRV_FMTS, set.srvFmt, set.srvW, set.srvH), proc = fmtOf(PROC_FMTS, set.procFmt, set.procW, set.procH);
   const servers = inv.servers.filter((s) => set.fam === "all" || s.fam === set.fam);
-  const r = VC.calculate(project.items, { srv, proc, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
+  const r = VC.calculate(project.items, { srv, proc, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
   last = { r, srv, proc };
   renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderOuts(r);
 }
@@ -350,7 +359,7 @@ function renderSummary(r) {
   const procBoxes = r.procUnits.filter((u) => u.used.length).length;
   const n4 = r.procOuts.filter((o) => o.big).length;
   $("summary").innerHTML =
-    stat("Выходы серверов", r.srvOuts.length, srvHave, "вых.", r.srvMissing, "серверов в работе: " + srvBoxes) +
+    stat("Выходы серверов", r.srvOuts.length, srvHave, "вых.", r.srvMissing, "серверов в работе: " + srvBoxes + (r.cluster ? " · связка: " + esc(r.cluster) : "")) +
     stat("Выходы процессоров", r.procOuts.length, procHave, "вых. 2K", r.procMissing, "из них 4K: " + n4 + " · процессоров: " + procBoxes) +
     '<div class="stat idle"><h2>Пикселей в ТЗ</h2><div class="big">' + (r.pixels / 1e6).toFixed(2) + ' <small>Мп</small></div><span class="hint">экранов: ' + r.active.length + "</span></div>";
 }
@@ -414,7 +423,7 @@ function summaryText() {
   L.push("");
   L.push("Процессоры: " + r.procOuts.length + " вых." + (r.procMissing ? " (не хватает " + r.procMissing + ")" : ""));
   r.procOuts.forEach((o) => L.push("  П" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
-  L.push("Серверы: " + r.srvOuts.length + " вых." + (r.srvMissing ? " (не хватает " + r.srvMissing + ")" : ""));
+  L.push("Серверы" + (r.cluster ? " (связка " + r.cluster + ")" : "") + ": " + r.srvOuts.length + " вых." + (r.srvMissing ? " (не хватает " + r.srvMissing + ")" : ""));
   r.srvOuts.forEach((o) => L.push("  С" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + (p.label ? " " + p.label : "") + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
   return L.join("\n");
 }

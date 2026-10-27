@@ -215,6 +215,26 @@ const VC = (() => {
     }
     return units;
   }
+  /* Связки: серверы с непустой связкой (cluster) работают только со своей связкой.
+     disguise 4x4pro не работает вместе с vx — это разные связки. Серверы без связки
+     (Resolume) независимы и добавляются к любой. Выбираем связку, при которой
+     не хватает меньше всего выходов, при равенстве — где занято меньше серверов. */
+  function pickServers(outs, servers, choice) {
+    const live = servers.filter((s) => s.on && (s.count | 0) > 0 && (s.outs | 0) > 0);
+    const clusters = [...new Set(live.map((s) => s.cluster || "").filter(Boolean))];
+    const cands = choice !== "auto" && clusters.includes(choice) ? [choice] : clusters.length ? clusters : [""];
+    let best = null;
+    for (const c of cands) {
+      const pool = live.filter((s) => !s.cluster || s.cluster === c);
+      outs.forEach((o) => { o.at = null; });
+      const units = allocServers(outs, pool);
+      const miss = outs.filter((o) => !o.at).length, used = units.filter((u) => u.used.length).length;
+      if (!best || miss < best.miss || (miss === best.miss && used < best.used)) best = { c, miss, used };
+    }
+    const pool = live.filter((s) => !s.cluster || s.cluster === best.c);
+    outs.forEach((o) => { o.at = null; });
+    return { units: allocServers(outs, pool), cluster: best.c, clusters };
+  }
   // Процессоры: ёмкость в слотах; выход 2K стоит 1 слот, 4K — slots/max4K.
   function allocProcessors(outs, procs) {
     const units = [];
@@ -243,13 +263,14 @@ const VC = (() => {
     const srvOuts = buildOutputs(active, set.srv, { pack: set.packSrv, rot: set.rotSrv }, "server");
     const viaProc = active.filter((it) => it.viaProc && !it.proj);
     const procOuts = buildOutputs(viaProc, set.proc, { pack: set.packProc, rot: set.rotProc }, "proc");
-    const srvUnits = allocServers(srvOuts, inv.servers);
+    const pick = pickServers(srvOuts, inv.servers, set.cluster || "auto");
+    const srvUnits = pick.units;
     const procUnits = allocProcessors(procOuts, inv.procs);
-    return { active, srvOuts, procOuts, srvUnits, procUnits,
+    return { active, srvOuts, procOuts, srvUnits, procUnits, cluster: pick.cluster, clusters: pick.clusters,
       srvMissing: srvOuts.filter((o) => !o.at).length, procMissing: procOuts.filter((o) => !o.at).length,
       pixels: active.reduce((s, it) => s + it.w * it.h, 0) };
   }
 
-  return { pint, screenDims, tzPngInfo, tzFolderInfo, occBBox, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, allocProcessors, calculate };
+  return { pint, screenDims, tzPngInfo, tzFolderInfo, occBBox, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, pickServers, allocProcessors, calculate };
 })();
 if (typeof module !== "undefined") module.exports = VC;
