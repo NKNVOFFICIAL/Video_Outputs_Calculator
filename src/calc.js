@@ -47,6 +47,20 @@ const VC = (() => {
     };
     return conv(doc.querySelector("plist > *"));
   }
+  /* Имя PNG из ZIP ТЗ: «ШxВ-название» (маска) или «ШxВ-scr1-2-5» (общее поле). */
+  function tzPngInfo(path) {
+    const file = path.split("/").pop().replace(/\.png$/i, "");
+    const m = file.match(/^(\d+)x(\d+)-(.*)$/);
+    if (!m) return null;
+    const f = m[3].match(/^scr(\d+(?:-\d+)*)$/);
+    return f ? { w: +m[1], h: +m[2], field: true, name: "Общее поле (экраны " + f[1].split("-").join(", ") + ")" }
+      : { w: +m[1], h: +m[2], field: false, name: m[3] || "screen" };
+  }
+  /* Папка ZIP ТЗ: «Проект ТЗ_Resolume/» → {project, label} */
+  function tzFolderInfo(path) {
+    const m = path.split("/")[0].match(/^(.*) ТЗ_(\w+)$/);
+    return m ? { project: m[1], label: m[2] } : null;
+  }
   function parseProjectText(text) {
     return /^\s*(<\?xml|<!DOCTYPE plist|<plist)/.test(text) ? parsePlist(text) : JSON.parse(text);
   }
@@ -130,6 +144,20 @@ const VC = (() => {
     }
     return bins.map((b) => ({ rot: b.rot, w: b.rot ? ch : cw, h: b.rot ? cw : ch, items: b.items, usedW: Math.max(...b.items.map((i) => i.ox + i.w)), usedH: Math.max(...b.items.map((i) => i.oy + i.h)) }));
   }
+  /* Границы занятых пикселей внутри куска. occ: {w, h, data: Uint8Array w*h (1 — занято), rows: Uint8Array h} */
+  function occBBox(occ, t) {
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    const xe = Math.min(occ.w, t.x + t.w), ye = Math.min(occ.h, t.y + t.h);
+    for (let y = t.y; y < ye; y++) {
+      if (!occ.rows[y]) continue;
+      const row = y * occ.w;
+      let a = t.x; while (a < xe && !occ.data[row + a]) a++;
+      if (a >= xe) continue;
+      let b = xe - 1; while (b > a && !occ.data[row + b]) b--;
+      if (a < x0) x0 = a; if (b > x1) x1 = b; if (y < y0) y0 = y; y1 = y;
+    }
+    return x1 >= 0 ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 } : null;
+  }
   /* Выходы одного уровня (сервер или процессор).
      items: [{key,name,w,h}], fmt: {w,h}, opts: {pack, rot}.
      Проекции на уровне сервера: один выход на проектор. */
@@ -152,6 +180,9 @@ const VC = (() => {
           }
           return x1 > x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
         }).filter(Boolean);
+      } else if (it.occ) {
+        // Поле из PNG ТЗ: режем кусок по непустым (не чёрным) пикселям картинки.
+        tiles = tiles.map((t) => occBBox(it.occ, t)).filter(Boolean);
       }
       tiles.forEach((t) => pieces.push({ key: it.key, name: it.name, ...t, rot, whole: !opts.pack || (t.w === (rot ? fmt.h : fmt.w) && t.h === (rot ? fmt.w : fmt.h)) }));
     }
@@ -219,6 +250,6 @@ const VC = (() => {
       pixels: active.reduce((s, it) => s + it.w * it.h, 0) };
   }
 
-  return { pint, screenDims, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, allocProcessors, calculate };
+  return { pint, screenDims, tzPngInfo, tzFolderInfo, occBBox, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, allocProcessors, calculate };
 })();
 if (typeof module !== "undefined") module.exports = VC;
