@@ -344,11 +344,47 @@ const VC = (() => {
     return [...m.values()];
   }
 
+  /* Ручная раскладка: [{w, h, rot, items: [{key, x, y, w, h, ox, oy, label}]}].
+     Пустые выходы не занимают железо; src — номер выхода в раскладке. */
+  function fromManual(layout, items) {
+    const keys = new Set(items.map((it) => it.key)), names = new Map(items.map((it) => [it.key, it.name]));
+    const outs = [];
+    layout.forEach((o, src) => {
+      const its = o.items.filter((p) => keys.has(p.key) && p.w > 0 && p.h > 0).map((p) => ({ ...p, name: names.get(p.key) }));
+      if (!its.length) return;
+      outs.push({ src, rot: !!o.rot, w: o.w, h: o.h, items: its,
+        usedW: Math.max(...its.map((p) => p.ox + p.w)), usedH: Math.max(...its.map((p) => p.oy + p.h)) });
+    });
+    outs.forEach((o, i) => { o.n = i + 1; o.keys = [...new Set(o.items.map((x) => x.key))]; o.big = o.usedW > 2048 || o.usedH > 1200; });
+    return outs;
+  }
+  /* Сколько пикселей экрана не попало ни в один кусок (пустые места полей не считаются). */
+  function uncovered(it, pieces) {
+    const xs = new Set([0, it.w]), ys = new Set([0, it.h]);
+    const ps = pieces.map((p) => ({ x0: Math.max(0, p.x), y0: Math.max(0, p.y), x1: Math.min(it.w, p.x + p.w), y1: Math.min(it.h, p.y + p.h) })).filter((p) => p.x1 > p.x0 && p.y1 > p.y0);
+    ps.forEach((p) => { xs.add(p.x0); xs.add(p.x1); ys.add(p.y0); ys.add(p.y1); });
+    (it.parts || []).forEach((p) => { xs.add(Math.max(0, Math.min(it.w, p.x))); xs.add(Math.max(0, Math.min(it.w, p.x + p.w))); ys.add(Math.max(0, Math.min(it.h, p.y))); ys.add(Math.max(0, Math.min(it.h, p.y + p.h))); });
+    const X = [...xs].sort((a, b) => a - b), Y = [...ys].sort((a, b) => a - b);
+    let area = 0, box = null;
+    for (let j = 0; j + 1 < Y.length; j++) for (let i = 0; i + 1 < X.length; i++) {
+      const c = { x: X[i], y: Y[j], w: X[i + 1] - X[i], h: Y[j + 1] - Y[j] };
+      if (!c.w || !c.h) continue;
+      if (ps.some((p) => p.x0 <= c.x && p.y0 <= c.y && p.x1 >= c.x + c.w && p.y1 >= c.y + c.h)) continue;
+      let a = 0, bb = null;
+      if (it.parts) { if (it.parts.some((p) => p.x <= c.x && p.y <= c.y && p.x + p.w >= c.x + c.w && p.y + p.h >= c.y + c.h)) { a = c.w * c.h; bb = c; } }
+      else if (it.occ) { bb = occBBox(it.occ, c); a = bb ? bb.w * bb.h : 0; }
+      else { a = c.w * c.h; bb = c; }
+      if (!a) continue;
+      area += a;
+      box = box ? { x: Math.min(box.x, bb.x), y: Math.min(box.y, bb.y), x1: Math.max(box.x1, bb.x + bb.w), y1: Math.max(box.y1, bb.y + bb.h) } : { x: bb.x, y: bb.y, x1: bb.x + bb.w, y1: bb.y + bb.h };
+    }
+    return { area, box: box && { x: box.x, y: box.y, w: box.x1 - box.x, h: box.y1 - box.y } };
+  }
   function calculate(items, set, inv) {
     const active = items.filter((it) => it.on && it.w > 0 && it.h > 0);
-    const srvOuts = buildOutputs(active, set.srv, { pack: set.packSrv, rot: set.rotSrv }, "server");
     const viaProc = active.filter((it) => it.viaProc && !it.proj);
-    const procOuts = buildOutputs(viaProc, set.proc, { pack: set.packProc, rot: set.rotProc }, "proc");
+    const srvOuts = set.manualSrv ? fromManual(set.manualSrv, active) : buildOutputs(active, set.srv, { pack: set.packSrv, rot: set.rotSrv }, "server");
+    const procOuts = set.manualProc ? fromManual(set.manualProc, viaProc) : buildOutputs(viaProc, set.proc, { pack: set.packProc, rot: set.rotProc }, "proc");
     const pick = pickServers(srvOuts, inv.servers, set.cluster || "auto", set.backup | 0);
     const srvUnits = pick.units;
     const procUnits = allocProcessors(procOuts, inv.procs);
@@ -357,6 +393,6 @@ const VC = (() => {
       pixels: active.reduce((s, it) => s + it.w * it.h, 0) };
   }
 
-  return { pint, screenDims, tzPngInfo, tzFolderInfo, occBBox, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, pickServers, allocProcessors, calculate };
+  return { pint, fromManual, uncovered, screenDims, tzPngInfo, tzFolderInfo, occBBox, parseProjectText, projectItems, tileGrid, tileItem, packPieces, buildOutputs, allocServers, pickServers, allocProcessors, calculate };
 })();
 if (typeof module !== "undefined") module.exports = VC;

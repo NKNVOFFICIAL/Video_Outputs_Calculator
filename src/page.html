@@ -108,6 +108,16 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; m
 .oc svg text { font-family: var(--f-mono); }
 .oc .f { font-size: 11px; color: var(--muted); font-family: var(--f-mono); }
 .oc.miss .t b { color: var(--bad); }
+.ptools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pwarn { font-size: 13px; line-height: 1.6; }
+.obox.editing .pc { cursor: grab; }
+.obox.editing svg.ocs { touch-action: none; user-select: none; -webkit-user-select: none; }
+.selp { border: 1px solid var(--accent); border-radius: 6px; padding: 12px; display: grid; gap: 10px; background: var(--accent-soft); }
+.sel-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; }
+.sel-g { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
+.sel-g label { display: inline-flex; gap: 5px; align-items: center; }
+.sel-g .lbl { color: var(--muted); min-width: 80px; }
+.sel-g select { max-width: 100%; }
 /* таблица выходов */
 .tbl-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
@@ -195,8 +205,19 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
       <section class="panel" aria-labelledby="hPack">
         <div class="item-h"><h2 id="hPack">Выходы: что внутри</h2><div class="seg" id="packSeg" role="group" aria-label="Какие выходы показать">
           <button data-v="srv">Серверы</button><button data-v="proc">Процессоры</button></div></div>
+        <div class="ptools">
+          <button class="btn sm" id="btnEdit">Править вручную</button>
+          <span class="tag" id="manTag" hidden>ручная раскладка</span>
+          <button class="btn sm" id="btnAddPiece" hidden>+ Кусок</button>
+          <button class="btn sm" id="btnAddOut" hidden>+ Пустой выход</button>
+          <button class="btn sm" id="btnDropEmpty" hidden>Убрать пустые</button>
+          <label class="chk" id="magnetBox" hidden><input type="checkbox" id="magnet" checked> магнит</label>
+          <button class="btn sm" id="btnResetAuto" hidden>Сбросить к авто</button>
+        </div>
+        <div class="pwarn" id="packWarn" hidden></div>
         <div class="obox" id="obox"></div>
-        <p class="hint">Каждая рамка — выход в своём разрешении. Внутри — куски экранов на тех местах, где они стоят в выходе; пустое место выхода заштриховано.</p>
+        <div class="selp" id="selPanel" hidden></div>
+        <p class="hint">Каждая рамка — выход в своём разрешении. Внутри — куски экранов на тех местах, где они стоят в выходе; пустое место выхода заштриховано. В ручном режиме куски перетаскиваются мышкой или пальцем внутри выхода и между выходами; магнит прилипает к краям выхода и соседних кусков. «+ Кусок» добавляет то, что ещё не попало в выходы. Ручная раскладка сбрасывается, если поменять экраны или формат выхода.</p>
       </section>
       <section class="panel" aria-labelledby="hOuts">
         <h2 id="hOuts">Карта выходов</h2>
@@ -363,7 +384,11 @@ function render(redrawInv = true) {
   if (redrawInv) renderInventory();
   const srv = fmtOf(SRV_FMTS, set.srvFmt, set.srvW, set.srvH), proc = fmtOf(PROC_FMTS, set.procFmt, set.procW, set.procH);
   const servers = inv.servers.filter((s) => set.fam === "all" || s.fam === set.fam);
-  const r = VC.calculate(project.items, { srv, proc, backup: set.backup | 0, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
+  for (const lv of ["srv", "proc"]) if (manual[lv] && manualSig[lv] !== sigOf(lv, srv, proc)) {
+    manual[lv] = null; sel = null; if (lv === packView) editMode = false;
+    toast("Ручная раскладка " + (lv === "srv" ? "серверов" : "процессоров") + " сброшена: изменились экраны или формат выхода");
+  }
+  const r = VC.calculate(project.items, { srv, proc, manualSrv: manual.srv, manualProc: manual.proc, backup: set.backup | 0, cluster: set.cluster, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
   last = { r, srv, proc };
   renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderPack(r); renderOuts(r);
 }
@@ -437,40 +462,200 @@ function outRows(outs, kind) {
   }).join("");
 }
 function countOf(name, kind) { const list = kind === "proc" ? inv.procs : inv.servers; const d = list.find((x) => x.name === name); return d ? d.count : 1; }
-/* Рамка выхода с кусками экранов внутри */
-let packView = "srv";
-function outCard(o, kind, byKey) {
-  const W = o.w, H = o.h, sw = Math.max(W, H) / 220, fs = Math.max(W, H) / 22;
-  const hid = "h" + kind + o.n;
+/* ===== Выходы: что внутри + ручная раскладка ===== */
+let packView = "srv", editMode = false, sel = null, magnet = true;
+const manual = { srv: null, proc: null }, manualSig = { srv: "", proc: "" };
+const levelItems = (r, lv) => (lv === "srv" ? r.active : r.active.filter((it) => it.viaProc && !it.proj));
+const levelFmt = (lv) => (lv === "srv" ? last.srv : last.proc);
+function sigOf(lv, srv, proc) {
+  const act = project.items.filter((it) => it.on && it.w > 0 && it.h > 0 && (lv === "srv" || (it.viaProc && it.type !== "proj")));
+  const f = lv === "srv" ? srv : proc;
+  return JSON.stringify([act.map((it) => [it.key, it.w, it.h]), f.w, f.h]);
+}
+const cloneLayout = (outs) => outs.map((o) => ({ w: o.w, h: o.h, rot: !!o.rot, items: o.items.map((p) => ({ key: p.key, x: p.x, y: p.y, w: p.w, h: p.h, ox: p.ox, oy: p.oy, label: p.label || "" })) }));
+function pieceIssues(o) {
+  const bad = new Set();
+  o.items.forEach((p, j) => {
+    if (p.ox < 0 || p.oy < 0 || p.ox + p.w > o.w || p.oy + p.h > o.h) bad.add(j);
+    o.items.forEach((q, k) => { if (k > j && p.ox < q.ox + q.w && q.ox < p.ox + p.w && p.oy < q.oy + q.h && q.oy < p.oy + p.h) { bad.add(j); bad.add(k); } });
+  });
+  return bad;
+}
+function outCard(mo, ro, kind, byKey, i) {
+  const W = mo.w, H = mo.h, sw = Math.max(W, H) / 220, fs = Math.max(W, H) / 22, n = ro ? ro.n : 0;
+  const hid = "h" + kind + (i == null ? n : "m" + i), bad = editMode ? pieceIssues(mo) : new Set();
   let g = '<defs><pattern id="' + hid + '" width="' + fs + '" height="' + fs + '" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="' + fs + '" height="' + fs + '" fill="var(--sunk)"/><line x1="0" y1="0" x2="0" y2="' + fs + '" stroke="var(--line)" stroke-width="' + fs / 4 + '"/></pattern></defs>' +
     '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + hid + ')"/>';
-  for (const p of o.items) {
-    const it = byKey.get(p.key);
+  mo.items.forEach((p, j) => {
+    const it = byKey.get(p.key), name = it ? it.name : p.name || "?", col = n ? tone(n) : "var(--muted)";
+    const isSel = editMode && sel && sel.i === i && sel.j === j;
+    g += '<g class="pc" data-i="' + i + '" data-j="' + j + '">';
     if (it && it.thumb) g += '<svg x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" viewBox="' + p.x + " " + p.y + " " + p.w + " " + p.h + '" preserveAspectRatio="none"><image href="' + it.thumb + '" x="0" y="0" width="' + it.w + '" height="' + it.h + '" preserveAspectRatio="none"/></svg>';
-    else g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="' + tone(o.n) + '" fill-opacity="0.35"/>';
-    g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="none" stroke="' + tone(o.n) + '" stroke-width="' + sw * 2 + '"/>';
+    else g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="' + col + '" fill-opacity="0.35"/>';
+    g += '<rect x="' + p.ox + '" y="' + p.oy + '" width="' + p.w + '" height="' + p.h + '" fill="' + (bad.has(j) ? "var(--bad)" : "none") + '" fill-opacity="0.25" stroke="' + (bad.has(j) ? "var(--bad)" : isSel ? "var(--accent)" : col) + '" stroke-width="' + sw * (isSel ? 4 : 2) + '"' + (isSel ? ' stroke-dasharray="' + sw * 8 + " " + sw * 4 + '"' : "") + "/>";
     const t = Math.min(fs, p.h / 3.2, p.w / 9);
     if (t > fs / 6) {
       const cx = p.ox + p.w / 2, cy = p.oy + p.h / 2;
-      g += '<text x="' + cx + '" y="' + (cy - t * 0.6) + '" font-size="' + t + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 6 + '" paint-order="stroke" font-weight="600">' + esc(p.name + (p.label ? " " + p.label : "")) + "</text>" +
-        '<text x="' + cx + '" y="' + (cy + t * 0.6) + '" font-size="' + t * 0.8 + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 7 + '" paint-order="stroke">' + p.w + "×" + p.h + " · " + p.x + "," + p.y + "</text>";
+      g += '<text x="' + cx + '" y="' + (cy - t * 0.6) + '" font-size="' + t + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 6 + '" paint-order="stroke" font-weight="600" pointer-events="none">' + esc(name + (p.label ? " " + p.label : "")) + "</text>" +
+        '<text x="' + cx + '" y="' + (cy + t * 0.6) + '" font-size="' + t * 0.8 + '" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width="' + t / 7 + '" paint-order="stroke" pointer-events="none">' + p.w + "×" + p.h + " · " + p.x + "," + p.y + "</text>";
     }
-  }
-  g += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="none" stroke="var(--ink)" stroke-width="' + sw + '"/>';
-  const where = (o.at ? esc(o.at.dev) + (countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · вых. " + o.at.port : "не хватает") + bkText(o, kind, " · ");
-  const fill = Math.round(o.items.reduce((s, p) => s + p.w * p.h, 0) / (W * H) * 100);
-  return '<div class="oc' + (o.at ? "" : " miss") + '"><div class="t"><b>' + (kind === "proc" ? "П" : "С") + o.n + '</b><span title="' + where.replace(/<[^>]+>/g, "") + '">' + where + "</span></div>" +
-    '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Выход ' + o.n + '">' + g + "</svg>" +
-    '<span class="f">' + W + "×" + H + (o.rot ? " ↻" : "") + (kind === "proc" ? (o.big ? " · 4K" : " · 2K") : "") + " · занято " + fill + "%</span></div>";
+    g += "</g>";
+  });
+  g += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="none" stroke="var(--ink)" stroke-width="' + sw + '" pointer-events="none"/>';
+  const where = !ro ? "пустой выход — не занимает железо" : (ro.at ? esc(ro.at.dev) + (countOf(ro.at.dev, kind) > 1 ? " #" + ro.at.unit : "") + " · вых. " + ro.at.port : "не хватает") + bkText(ro, kind, " · ");
+  const fill = Math.round(mo.items.reduce((s, p) => s + p.w * p.h, 0) / (W * H) * 100);
+  const big = ro ? ro.big : false;
+  return '<div class="oc' + (ro && !ro.at ? " miss" : "") + '"><div class="t"><b>' + (ro ? (kind === "proc" ? "П" : "С") + n : "—") + '</b><span title="' + where.replace(/<[^>]+>/g, "") + '">' + where + "</span></div>" +
+    '<svg class="ocs" data-i="' + (i == null ? "" : i) + '" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Выход ' + (n || "пустой") + '">' + g + "</svg>" +
+    '<span class="f">' + W + "×" + H + (mo.rot ? " ↻" : "") + (kind === "proc" && ro ? (big ? " · 4K" : " · 2K") : "") + " · занято " + fill + "%" + (bad.size ? ' · <b style="color:var(--bad)">наложение или выход за рамку</b>' : "") + "</span></div>";
 }
 function renderPack(r) {
-  const has = { proc: r.procOuts.length > 0, srv: r.srvOuts.length > 0 };
+  const has = { proc: r.procOuts.length > 0 || !!manual.proc, srv: r.srvOuts.length > 0 || !!manual.srv };
   if (!has[packView]) packView = has.proc ? "proc" : "srv";
   document.querySelectorAll("#packSeg button").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.v === packView)); b.disabled = !has[b.dataset.v]; });
-  const outs = packView === "proc" ? r.procOuts : r.srvOuts, byKey = new Map(project.items.map((it) => [it.key, it]));
-  $("obox").innerHTML = outs.length ? outs.map((o) => outCard(o, packView, byKey)).join("") : '<p class="hint">Нет выходов.</p>';
+  const lv = packView, outs = lv === "proc" ? r.procOuts : r.srvOuts, byKey = new Map(project.items.map((it) => [it.key, it]));
+  const man = manual[lv];
+  if (man && sel && (!man[sel.i] || !man[sel.i].items[sel.j])) sel = null;
+  $("obox").classList.toggle("editing", editMode && !!man);
+  $("btnEdit").textContent = editMode ? "Готово" : "Править вручную";
+  $("btnEdit").classList.toggle("pri", editMode);
+  for (const id of ["btnAddOut", "btnAddPiece", "btnDropEmpty", "magnetBox"]) $(id).hidden = !editMode;
+  $("btnResetAuto").hidden = !man;
+  $("manTag").hidden = !man;
+  $("obox").innerHTML = man ? man.map((mo, i) => outCard(mo, outs.find((o) => o.src === i), lv, byKey, i)).join("")
+    : outs.length ? outs.map((o) => outCard(o, o, lv, byKey, null)).join("") : '<p class="hint">Нет выходов.</p>';
+  // покрытие экранов
+  const warn = [];
+  if (man) {
+    const all = man.flatMap((o) => o.items);
+    for (const it of levelItems(r, lv)) {
+      const u = VC.uncovered(it, all.filter((p) => p.key === it.key));
+      if (u.area > 0) warn.push(esc(it.name) + ': не попало <span class="mono">' + u.area.toLocaleString("ru-RU") + " px</span> (область " + u.box.w + "×" + u.box.h + " @ " + u.box.x + "," + u.box.y + ")");
+    }
+    const nb = man.reduce((s, o) => s + pieceIssues(o).size, 0);
+    if (nb) warn.push("кусков с наложением или за рамкой выхода: " + nb);
+  }
+  $("packWarn").innerHTML = man ? (warn.length ? '<span class="pill bad">проверьте</span> ' + warn.join(" · ") : '<span class="pill ok">все экраны покрыты</span>') : "";
+  $("packWarn").hidden = !man;
+  renderSel(r);
 }
-document.querySelectorAll("#packSeg button").forEach((b) => b.onclick = () => { packView = b.dataset.v; renderPack(last.r); });
+function renderSel(r) {
+  const box = $("selPanel"), man = manual[packView];
+  if (!editMode || !man || !sel) { box.hidden = true; return; }
+  const p = man[sel.i].items[sel.j], its = levelItems(r, packView);
+  box.hidden = false;
+  const num = (id, v, lbl) => '<label>' + lbl + ' <input type="number" id="' + id + '" value="' + v + '"></label>';
+  box.innerHTML = '<div class="sel-h"><h3>Кусок в выходе ' + (sel.i + 1) + '</h3><span class="hint">Стрелки двигают на 1 px, с Shift — на 10; Delete удаляет</span></div>' +
+    '<div class="sel-g"><label>Экран <select id="sKey">' + its.map((it) => '<option value="' + esc(it.key) + '"' + (it.key === p.key ? " selected" : "") + ">" + esc(it.name) + " · " + it.w + "×" + it.h + "</option>").join("") + "</select></label></div>" +
+    '<div class="sel-g"><span class="lbl">Из экрана</span>' + num("sX", p.x, "x") + num("sY", p.y, "y") + num("sW", p.w, "ш") + num("sH", p.h, "в") + "</div>" +
+    '<div class="sel-g"><span class="lbl">В выходе</span>' + num("sOX", p.ox, "x") + num("sOY", p.oy, "y") + "</div>" +
+    '<div class="tools"><button class="btn sm" id="sSplitW">Разрезать по ширине</button><button class="btn sm" id="sSplitH">Разрезать по высоте</button><button class="btn sm" id="sNewOut">В новый выход</button><button class="btn sm" id="sDel">Удалить кусок</button></div>';
+  const upd = (f) => { f(p); render(); };
+  $("sKey").onchange = (e) => upd((q) => { q.key = e.target.value; });
+  [["sX", "x"], ["sY", "y"], ["sW", "w"], ["sH", "h"], ["sOX", "ox"], ["sOY", "oy"]].forEach(([id, k]) => $(id).onchange = (e) => upd((q) => { q[k] = VC.pint(e.target.value, q[k]); if (k === "w" || k === "h") q[k] = Math.max(1, q[k]); }));
+  $("sSplitW").onclick = () => splitSel("w");
+  $("sSplitH").onclick = () => splitSel("h");
+  $("sNewOut").onclick = () => { const f = levelFmt(packView), it = man[sel.i].items.splice(sel.j, 1)[0]; it.ox = 0; it.oy = 0; man.push({ w: f.w, h: f.h, rot: false, items: [it] }); sel = { i: man.length - 1, j: 0 }; render(); };
+  $("sDel").onclick = delSel;
+}
+function splitSel(dim) {
+  const man = manual[packView], arr = man[sel.i].items, p = arr[sel.j];
+  if (p[dim] < 2) return;
+  const a = Math.round(p[dim] / 4) * 2 || 1, q = { ...p };
+  p[dim] = a; q[dim] -= a;
+  if (dim === "w") { q.x += a; q.ox += a; } else { q.y += a; q.oy += a; }
+  arr.splice(sel.j + 1, 0, q);
+  render();
+}
+function delSel() { manual[packView][sel.i].items.splice(sel.j, 1); sel = null; render(); }
+function startEdit() {
+  const lv = packView;
+  if (!manual[lv]) { manual[lv] = cloneLayout(lv === "srv" ? last.r.srvOuts : last.r.procOuts); manualSig[lv] = sigOf(lv, last.srv, last.proc); }
+  editMode = true; sel = null; render();
+}
+document.querySelectorAll("#packSeg button").forEach((b) => b.onclick = () => { packView = b.dataset.v; sel = null; if (editMode && !manual[packView]) startEdit(); else renderPack(last.r); });
+$("btnEdit").onclick = () => { if (editMode) { editMode = false; sel = null; render(); } else startEdit(); };
+$("btnResetAuto").onclick = () => { manual[packView] = null; sel = null; editMode = false; render(); toast("Раскладка снова автоматическая"); };
+$("btnAddOut").onclick = () => { const f = levelFmt(packView); manual[packView].push({ w: f.w, h: f.h, rot: false, items: [] }); render(); };
+$("btnDropEmpty").onclick = () => { const m = manual[packView]; for (let i = m.length - 1; i >= 0; i--) if (!m[i].items.length) m.splice(i, 1); sel = null; render(); };
+$("btnAddPiece").onclick = () => {
+  const man = manual[packView], f = levelFmt(packView), its = levelItems(last.r, packView), all = man.flatMap((o) => o.items);
+  if (!its.length) return;
+  let it = its[0], box = { x: 0, y: 0, w: it.w, h: it.h };
+  for (const c of its) { const u = VC.uncovered(c, all.filter((p) => p.key === c.key)); if (u.area > 0) { it = c; box = u.box; break; } }
+  const p = { key: it.key, x: box.x, y: box.y, w: Math.min(box.w, f.w), h: Math.min(box.h, f.h), ox: 0, oy: 0, label: "" };
+  let ti = man.findIndex((o) => !o.items.length);
+  if (ti < 0) { man.push({ w: f.w, h: f.h, rot: false, items: [] }); ti = man.length - 1; }
+  man[ti].items.push(p); sel = { i: ti, j: man[ti].items.length - 1 }; render();
+  toast("Кусок «" + it.name + "» " + p.w + "×" + p.h + " добавлен в выход " + (ti + 1));
+};
+$("magnet").onchange = (e) => { magnet = e.target.checked; };
+
+/* перетаскивание */
+let drag = null;
+const NS = "http://www.w3.org/2000/svg";
+function svgPoint(svg, e) { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+function snapPos(T, p, nx, ny, thr, skip) {
+  if (magnet) {
+    const xs = [0, T.w - p.w], ys = [0, T.h - p.h];
+    T.items.forEach((q, k) => { if (k === skip) return; xs.push(q.ox, q.ox + q.w, q.ox - p.w, q.ox + q.w - p.w); ys.push(q.oy, q.oy + q.h, q.oy - p.h, q.oy + q.h - p.h); });
+    const near = (v, list) => { let b = v, d = thr; for (const c of list) if (Math.abs(c - v) <= d) { d = Math.abs(c - v); b = c; } return b; };
+    nx = near(nx, xs); ny = near(ny, ys);
+  }
+  nx = p.w <= T.w ? Math.max(0, Math.min(T.w - p.w, nx)) : 0;
+  ny = p.h <= T.h ? Math.max(0, Math.min(T.h - p.h, ny)) : 0;
+  return [Math.round(nx), Math.round(ny)];
+}
+$("obox").addEventListener("pointerdown", (e) => {
+  if (!editMode || !manual[packView]) return;
+  const g = e.target.closest(".pc");
+  if (!g) { if (sel) { sel = null; renderPack(last.r); } return; }
+  const svg = g.closest("svg.ocs"), i = +g.dataset.i, j = +g.dataset.j, p = manual[packView][i].items[j], loc = svgPoint(svg, e);
+  drag = { i, j, p, dx: loc.x - p.ox, dy: loc.y - p.oy, sx: e.clientX, sy: e.clientY, moved: false, target: null };
+  e.preventDefault();
+});
+window.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+  drag.moved = true;
+  const el = document.elementFromPoint(e.clientX, e.clientY), svg = el && el.closest && el.closest("svg.ocs");
+  if (!svg || svg.dataset.i === "") return;
+  const ti = +svg.dataset.i, T = manual[packView][ti], loc = svgPoint(svg, e);
+  const thr = 12 * T.w / Math.max(1, svg.getBoundingClientRect().width);
+  const [nx, ny] = snapPos(T, drag.p, loc.x - drag.dx, loc.y - drag.dy, thr, ti === drag.i ? drag.j : -1);
+  drag.target = { ti, nx, ny };
+  document.querySelectorAll(".ghost").forEach((x) => x.remove());
+  const r = document.createElementNS(NS, "rect");
+  r.setAttribute("class", "ghost");
+  for (const [k, v] of [["x", nx], ["y", ny], ["width", drag.p.w], ["height", drag.p.h], ["fill", "var(--accent)"], ["fill-opacity", "0.35"], ["stroke", "var(--accent)"], ["stroke-width", T.w / 110], ["pointer-events", "none"]]) r.setAttribute(k, v);
+  svg.appendChild(r);
+  const src = document.querySelector('.pc[data-i="' + drag.i + '"][data-j="' + drag.j + '"]');
+  if (src) src.style.opacity = "0.3";
+});
+window.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  document.querySelectorAll(".ghost").forEach((x) => x.remove());
+  const man = manual[packView];
+  if (d.moved && d.target) {
+    const src = man[d.i].items;
+    src.splice(d.j, 1);
+    d.p.ox = d.target.nx; d.p.oy = d.target.ny;
+    man[d.target.ti].items.push(d.p);
+    sel = { i: d.target.ti, j: man[d.target.ti].items.length - 1 };
+    render();
+  } else { sel = { i: d.i, j: d.j }; renderPack(last.r); }
+});
+window.addEventListener("keydown", (e) => {
+  if (!editMode || !sel || !manual[packView]) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+  const p = manual[packView][sel.i].items[sel.j], st = e.shiftKey ? 10 : 1;
+  const mv = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key];
+  if (mv) { e.preventDefault(); p.ox += mv[0]; p.oy += mv[1]; render(); }
+  else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); delSel(); }
+  else if (e.key === "Escape") { sel = null; renderPack(last.r); }
+});
 function renderOuts(r) {
   $("outs").innerHTML = "<thead><tr><th>№</th><th>Устройство</th><th>Занято</th><th>Что на выходе (кусок экрана @ x,y)</th></tr></thead><tbody>" +
     (r.procOuts.length ? '<tr><td colspan="4"><h3>Процессоры → LED</h3></td></tr>' + outRows(r.procOuts, "proc") : "") +
