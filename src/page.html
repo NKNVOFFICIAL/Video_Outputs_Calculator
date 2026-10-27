@@ -1,0 +1,455 @@
+<title>Калькулятор видеовыходов</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Unbounded:wght@600&display=swap">
+<style>
+/* Layout: пульт инженера — слева вход (экраны, форматы), справа результат; парк железа ниже на всю ширину */
+:root {
+  --bg: #ECF0F2; --panel: #FFFFFF; --sunk: #F4F7F8; --ink: #14202A; --muted: #5A6A76; --line: #D3DBE0;
+  --accent: #0B746F; --accent-ink: #FFFFFF; --accent-soft: #DCEFEC;
+  --good: #1D7A3B; --good-soft: #DFF1E4; --warn: #A8561A; --warn-soft: #F7E7D8; --bad: #BF2B2B; --bad-soft: #F8DEDE;
+  --t1: #2F7FD0; --t2: #D07A2F; --t3: #2FA36B; --t4: #A54FC4; --t5: #C9405A; --t6: #3BA7B5; --t7: #8C8A2E; --t8: #5C66D6;
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0E1418; --panel: #151D22; --sunk: #11181C; --ink: #E2E9EE; --muted: #8E9DA8; --line: #263239;
+  --accent: #3DBFB5; --accent-ink: #062523; --accent-soft: #143331;
+  --good: #5CC27C; --good-soft: #15301F; --warn: #E89B5B; --warn-soft: #3A2716; --bad: #F06B6B; --bad-soft: #3B1A1A;
+  --t1: #5DA2E8; --t2: #E89B5B; --t3: #5CC28F; --t4: #C27BDB; --t5: #E86A82; --t6: #5CC6D3; --t7: #C2BF5C; --t8: #8A92EC;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0E1418; --panel: #151D22; --sunk: #11181C; --ink: #E2E9EE; --muted: #8E9DA8; --line: #263239;
+  --accent: #3DBFB5; --accent-ink: #062523; --accent-soft: #143331;
+  --good: #5CC27C; --good-soft: #15301F; --warn: #E89B5B; --warn-soft: #3A2716; --bad: #F06B6B; --bad-soft: #3B1A1A;
+  --t1: #5DA2E8; --t2: #E89B5B; --t3: #5CC28F; --t4: #C27BDB; --t5: #E86A82; --t6: #5CC6D3; --t7: #C2BF5C; --t8: #8A92EC;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; }
+.wrap { max-width: 1320px; margin: 0 auto; display: grid; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+h1 { font-family: var(--f-display); font-weight: 600; font-size: 22px; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 62ch; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; margin: 0; color: var(--muted); }
+h3 { font-size: 15px; margin: 0; font-weight: 600; }
+.mono, .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.btn { font: 500 13px/1 var(--f-body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn.pri { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.sm { padding: 6px 9px; font-size: 12px; }
+.btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.main { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.col { display: grid; gap: 20px; min-width: 0; }
+input[type=number], input[type=text], select { font: 13px var(--f-body); color: var(--ink); background: var(--sunk); border: 1px solid var(--line); border-radius: 5px; padding: 6px 7px; min-width: 0; }
+input[type=number] { font-family: var(--f-mono); width: 76px; }
+input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.screens { display: grid; gap: 8px; }
+.scr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); }
+.scr.off { opacity: 0.55; }
+.scr .nm { width: 100%; font-weight: 600; background: transparent; border-color: transparent; padding: 3px 4px; }
+.scr .nm:hover { border-color: var(--line); }
+.scr .dims { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; color: var(--muted); font-size: 12px; }
+.scr .dims label { display: inline-flex; gap: 5px; align-items: center; }
+.scr .del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; }
+.scr .del:hover { color: var(--bad); }
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.tag.proj { background: var(--warn-soft); color: var(--warn); }
+.settings { display: grid; gap: 10px; }
+.set-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; align-items: center; }
+.set-row > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.set-row .lbl { color: var(--muted); font-size: 13px; }
+.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
+.set-row > .seg, .seg { display: inline-flex; gap: 0; width: max-content; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { font: 500 12px var(--f-body); background: var(--panel); color: var(--ink); border: 0; padding: 7px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
+/* сводка */
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 6px; border-left-width: 4px; }
+.stat.ok { border-left-color: var(--good); } .stat.bad { border-left-color: var(--bad); } .stat.idle { border-left-color: var(--line); }
+.stat .big { font-family: var(--f-mono); font-size: 30px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat .big small { font-size: 14px; color: var(--muted); font-weight: 400; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; width: max-content; }
+.pill.ok { background: var(--good-soft); color: var(--good); } .pill.bad { background: var(--bad-soft); color: var(--bad); } .pill.idle { background: var(--sunk); color: var(--muted); }
+/* загрузка устройств */
+.usage { display: grid; gap: 6px; }
+.u-row { display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr) 96px; gap: 10px; align-items: center; font-size: 13px; }
+.u-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar { height: 10px; background: var(--sunk); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.bar i.full { background: var(--warn); }
+.u-row .num { text-align: right; color: var(--muted); font-size: 12px; }
+/* схемы экранов */
+.items { display: grid; gap: 16px; }
+.item { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 10px; min-width: 0; }
+.item:first-child { border-top: 0; padding-top: 0; }
+.item-h { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; justify-content: space-between; }
+.item-h .meta { color: var(--muted); font-size: 12px; }
+.diagrams { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.dg { display: grid; gap: 6px; min-width: 0; }
+.dg .cap { font-size: 12px; color: var(--muted); }
+.dg svg { width: 100%; height: auto; max-height: 240px; display: block; background: var(--sunk); border-radius: 4px; }
+.dg svg text { font-family: var(--f-mono); }
+/* таблица выходов */
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.num { white-space: nowrap; }
+td .miss { color: var(--bad); font-weight: 600; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+/* парк */
+details.inv > summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+details.inv > summary::-webkit-details-marker { display: none; }
+details.inv > summary h2::before { content: "▸ "; }
+details.inv[open] > summary h2::before { content: "▾ "; }
+.inv-grid { display: grid; gap: 18px; margin-top: 14px; }
+.inv table input[type=text] { width: 100%; min-width: 160px; }
+.inv td { vertical-align: middle; }
+.inv td.note { color: var(--muted); font-size: 12px; min-width: 180px; }
+.fam { font-size: 11px; color: var(--muted); }
+.drop { border: 1.5px dashed var(--line); border-radius: 6px; padding: 12px; text-align: center; color: var(--muted); font-size: 13px; }
+.drop.hot { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.example { font-size: 12px; color: var(--warn); }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 6px; font-size: 13px; z-index: 20; max-width: calc(100% - 32px); }
+footer { color: var(--muted); font-size: 12px; text-align: center; }
+@media (max-width: 520px) { .set-row { grid-template-columns: minmax(0, 1fr); } .u-row { grid-template-columns: minmax(0, 1fr) 64px; } .u-row .bar { grid-column: 1 / 3; grid-row: 2; } }
+@media (prefers-reduced-motion: no-preference) { .bar i { transition: width .25s ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Калькулятор видеовыходов</h1>
+      <p class="sub">Экраны из ТЗ LED Pixel Mask Generator раскладываются по выходам медиасерверов и процессоров вашего парка.</p>
+    </div>
+    <div class="tools">
+      <input type="file" id="file" accept=".ledmask,.json,.plist,application/json,application/xml,text/xml" hidden>
+      <button class="btn pri" id="btnOpen">Открыть проект .ledmask</button>
+      <button class="btn" id="btnAdd">Добавить экран</button>
+      <button class="btn" id="btnCopy">Скопировать расчёт</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <div class="col">
+      <section class="panel" aria-labelledby="hScreens">
+        <div class="item-h"><h2 id="hScreens">Экраны</h2><span class="example" id="projName"></span></div>
+        <div class="drop" id="drop">Перетащите сюда файл проекта .ledmask</div>
+        <div class="screens" id="screens"></div>
+        <p class="hint">Отмечены экраны, которые идут в ТЗ: общие поля целиком и маски, которые не стоят на полях. «Процессор» — экран идёт через процессор; проекции идут с сервера напрямую.</p>
+      </section>
+
+      <section class="panel settings" aria-labelledby="hSet">
+        <h2 id="hSet">Форматы выходов</h2>
+        <div class="set-row"><span class="lbl">Серверы</span><div class="seg" id="famSeg" role="group" aria-label="Какие медиасерверы">
+          <button data-v="disguise">disguise</button><button data-v="resolume">Resolume</button><button data-v="all">Все</button></div></div>
+        <div class="set-row"><span class="lbl">Выход сервера</span><div>
+          <select id="srvFmt" aria-label="Разрешение выхода сервера"></select>
+          <span id="srvCustom"><input type="number" id="srvW" min="16" max="8192" aria-label="Ширина"> × <input type="number" id="srvH" min="16" max="8192" aria-label="Высота"></span></div></div>
+        <div class="set-row"><span class="lbl">Выход процессора</span><div>
+          <select id="procFmt" aria-label="Разрешение выхода процессора"></select>
+          <span id="procCustom"><input type="number" id="procW" min="16" max="8192" aria-label="Ширина"> × <input type="number" id="procH" min="16" max="8192" aria-label="Высота"></span></div></div>
+        <div class="set-row"><span class="lbl">Упаковка</span><div>
+          <label class="chk"><input type="checkbox" id="packSrv"> остатки на сервере</label>
+          <label class="chk"><input type="checkbox" id="packProc"> остатки на процессоре</label></div></div>
+        <div class="set-row"><span class="lbl">Поворот 90°</span><div>
+          <label class="chk"><input type="checkbox" id="rotSrv"> сервер</label>
+          <label class="chk"><input type="checkbox" id="rotProc"> процессор</label></div></div>
+        <p class="hint">Упаковка собирает краевые куски разных экранов на одном выходе. Поворот разрешает выход в портретной ориентации, если так выходов меньше. Выход процессора до 2048×1200 считается как 2K, больше — как 4K.</p>
+      </section>
+    </div>
+
+    <div class="col">
+      <div class="summary" id="summary"></div>
+      <section class="panel" aria-labelledby="hUse">
+        <h2 id="hUse">Загрузка оборудования</h2>
+        <div class="usage" id="usage"></div>
+      </section>
+      <section class="panel" aria-labelledby="hItems">
+        <h2 id="hItems">Нарезка экранов</h2>
+        <div class="items" id="items"></div>
+      </section>
+      <section class="panel" aria-labelledby="hOuts">
+        <h2 id="hOuts">Карта выходов</h2>
+        <div class="tbl-wrap"><table id="outs"></table></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel">
+    <details class="inv" id="invBox">
+      <summary><h2>Парк оборудования</h2><span class="hint">Правки сохраняются в этом браузере</span></summary>
+      <div class="inv-grid">
+        <div class="tbl-wrap"><table id="invProc"></table></div>
+        <div class="tbl-wrap"><table id="invSrv"></table></div>
+        <div class="tools"><button class="btn sm" id="invReset">Вернуть парк по умолчанию</button></div>
+        <p class="hint">Resolume: у сервера без второй видеокарты один выход отдан под мониторы оператора. Характеристики disguise, Barco и PixelHue — из документации производителей; у Gen 1 учтена сгоревшая VPU.</p>
+      </div>
+    </details>
+  </section>
+  <footer>© 2026 Khokhryakov Viatcheslav, Nikonov Konstantin</footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/*CALC*/
+/*INV*/
+(() => {
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const TONES = ["--t1", "--t2", "--t3", "--t4", "--t5", "--t6", "--t7", "--t8"];
+const tone = (n) => "var(" + TONES[(n - 1) % TONES.length] + ")";
+
+const SRV_FMTS = [["4K UHD 3840×2160", 3840, 2160], ["4K DCI 4096×2160", 4096, 2160], ["Full HD 1920×1080", 1920, 1080], ["WUXGA 1920×1200", 1920, 1200], ["Своё", 0, 0]];
+const PROC_FMTS = [["2K 1920×1080", 1920, 1080], ["2K 2048×1200 (E2)", 2048, 1200], ["4K UHD 3840×2160", 3840, 2160], ["4K 4096×2160", 4096, 2160], ["Своё", 0, 0]];
+
+/* состояние */
+let inv = lsGet("vcalc.inv") || clone(DEFAULT_INV);
+const set = Object.assign({ fam: "all", srvFmt: 0, srvW: 3840, srvH: 2160, procFmt: 0, procW: 1920, procH: 1080, packSrv: true, packProc: false, rotSrv: false, rotProc: false }, lsGet("vcalc.set") || {});
+let project = { name: "", example: true, items: [] };
+
+function sampleProject() {
+  // Пример: сцена из центра и двух боковых экранов на общем поле + отдельный экран и проекция.
+  const d = { projectName: "Пример", screens: [
+    { uid: "a", name: "центр", cabWpx: 192, cabHpx: 192, cabCols: 32, cabRows: 9 },
+    { uid: "b", name: "лево", cabWpx: 192, cabHpx: 192, cabCols: 10, cabRows: 14 },
+    { uid: "c", name: "право", cabWpx: 192, cabHpx: 192, cabCols: 10, cabRows: 14 },
+    { uid: "d", name: "подиум", cabWpx: 128, cabHpx: 128, cabCols: 24, cabRows: 3 },
+    { uid: "e", name: "projection 1", kind: "proj", proj: { pw: 1920, ph: 1200, nx: 2, ny: 1, ox: 15, oy: 15 } } ],
+    fields: [{ id: "F", name: "Сцена", items: [{ uid: "b", x: 0, y: 0 }, { uid: "a", x: 1920, y: 480 }, { uid: "c", x: 8064, y: 0 }] }] };
+  return VC.projectItems(d);
+}
+function loadProject(p, example) {
+  project = { name: p.name, example, items: p.items.map((it) => ({ ...it, viaProc: it.type !== "proj" })) };
+  render();
+}
+
+/* ввод экранов */
+function renderScreens() {
+  $("projName").textContent = project.example ? "пример — откройте свой проект" : (project.name ? "проект: " + project.name : "");
+  $("projName").className = project.example ? "example" : "hint";
+  const box = $("screens");
+  box.innerHTML = "";
+  project.items.forEach((it, i) => {
+    const el = document.createElement("div");
+    el.className = "scr" + (it.on ? "" : " off");
+    const editable = it.type === "manual";
+    el.innerHTML =
+      '<input type="checkbox" id="on' + i + '" ' + (it.on ? "checked" : "") + ' aria-label="Учитывать экран">' +
+      '<input type="text" class="nm" id="nm' + i + '" value="' + esc(it.name) + '" aria-label="Название">' +
+      (editable ? '<button class="del" id="del' + i + '" aria-label="Удалить экран">×</button>' : '<span class="tag ' + (it.type === "proj" ? "proj" : "") + '">' + (it.type === "field" ? "поле" : it.type === "proj" ? "проекция" : "маска") + "</span>") +
+      '<div class="dims">' +
+      (editable ? '<label><input type="number" id="w' + i + '" min="1" max="65536" value="' + it.w + '" aria-label="Ширина, px"> ×</label><label><input type="number" id="h' + i + '" min="1" max="65536" value="' + it.h + '" aria-label="Высота, px"> px</label>'
+        : '<span class="mono">' + it.w + "×" + it.h + "</span>") +
+      (it.type !== "proj" ? '<label class="chk"><input type="checkbox" id="vp' + i + '" ' + (it.viaProc ? "checked" : "") + "> процессор</label>" : "") +
+      (it.note ? "<span>" + esc(it.note) + "</span>" : "") + "</div>";
+    box.appendChild(el);
+    $("on" + i).onchange = (e) => { it.on = e.target.checked; render(); };
+    $("nm" + i).onchange = (e) => { it.name = e.target.value || it.name; render(); };
+    if ($("vp" + i)) $("vp" + i).onchange = (e) => { it.viaProc = e.target.checked; render(); };
+    if (editable) {
+      $("w" + i).onchange = (e) => { it.w = Math.max(1, VC.pint(e.target.value, it.w)); render(); };
+      $("h" + i).onchange = (e) => { it.h = Math.max(1, VC.pint(e.target.value, it.h)); render(); };
+      $("del" + i).onclick = () => { project.items.splice(i, 1); render(); };
+    }
+  });
+}
+
+/* настройки */
+function fillFmt(sel, list, idx) { sel.innerHTML = list.map((f, i) => '<option value="' + i + '">' + f[0] + "</option>").join(""); sel.value = idx; }
+function fmtOf(list, idx, w, h) { const f = list[idx] || list[0]; return f[1] ? { w: f[1], h: f[2] } : { w: Math.max(16, w | 0), h: Math.max(16, h | 0) }; }
+function syncSettings() {
+  fillFmt($("srvFmt"), SRV_FMTS, set.srvFmt); fillFmt($("procFmt"), PROC_FMTS, set.procFmt);
+  for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).value = set[k];
+  for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).checked = !!set[k];
+  document.querySelectorAll("#famSeg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === set.fam)));
+}
+function bindSettings() {
+  $("srvFmt").onchange = (e) => { set.srvFmt = +e.target.value; render(); };
+  $("procFmt").onchange = (e) => { set.procFmt = +e.target.value; render(); };
+  for (const k of ["srvW", "srvH", "procW", "procH"]) $(k).onchange = (e) => { set[k] = Math.max(16, Math.min(8192, VC.pint(e.target.value, set[k]))); render(); };
+  for (const k of ["packSrv", "packProc", "rotSrv", "rotProc"]) $(k).onchange = (e) => { set[k] = e.target.checked; render(); };
+  document.querySelectorAll("#famSeg button").forEach((b) => b.onclick = () => { set.fam = b.dataset.v; render(); });
+}
+
+/* парк */
+function renderInventory() {
+  const p = $("invProc");
+  p.innerHTML = "<thead><tr><th>В работе</th><th>Процессор</th><th>Шт.</th><th>Выходов 2K</th><th>Выходов 4K</th><th>Макс. ширина</th><th>Примечание</th></tr></thead><tbody>" +
+    inv.procs.map((d, i) => '<tr><td><input type="checkbox" id="pOn' + i + '" ' + (d.on ? "checked" : "") + ' aria-label="В работе"></td>' +
+      '<td><input type="text" id="pNm' + i + '" value="' + esc(d.name) + '" aria-label="Название"></td>' +
+      '<td><input type="number" id="pCt' + i + '" min="0" max="99" value="' + d.count + '" aria-label="Количество"></td>' +
+      '<td><input type="number" id="p2k' + i + '" min="0" max="128" value="' + d.max2k + '" aria-label="Выходов 2K"></td>' +
+      '<td><input type="number" id="p4k' + i + '" min="0" max="128" value="' + d.max4k + '" aria-label="Выходов 4K"></td>' +
+      '<td><input type="number" id="pMW' + i + '" min="16" max="16384" value="' + d.maxW + '" aria-label="Макс. ширина выхода"></td>' +
+      '<td class="note">' + esc(d.note || "") + "</td></tr>").join("") + "</tbody>";
+  inv.procs.forEach((d, i) => {
+    $("pOn" + i).onchange = (e) => { d.on = e.target.checked; saveInv(); };
+    $("pNm" + i).onchange = (e) => { d.name = e.target.value || d.name; saveInv(); };
+    $("pCt" + i).onchange = (e) => { d.count = Math.max(0, VC.pint(e.target.value, d.count)); saveInv(); };
+    $("p2k" + i).onchange = (e) => { d.max2k = Math.max(0, VC.pint(e.target.value, d.max2k)); saveInv(); };
+    $("p4k" + i).onchange = (e) => { d.max4k = Math.max(0, VC.pint(e.target.value, d.max4k)); saveInv(); };
+    $("pMW" + i).onchange = (e) => { d.maxW = Math.max(16, VC.pint(e.target.value, d.maxW)); saveInv(); };
+  });
+  const s = $("invSrv");
+  s.innerHTML = "<thead><tr><th>В работе</th><th>Медиасервер</th><th>Видеокарты</th><th>Шт.</th><th>Выходов</th><th>Макс. выход</th><th>Примечание</th></tr></thead><tbody>" +
+    inv.servers.map((d, i) => '<tr><td><input type="checkbox" id="sOn' + i + '" ' + (d.on ? "checked" : "") + ' aria-label="В работе"></td>' +
+      '<td><input type="text" id="sNm' + i + '" value="' + esc(d.name) + '" aria-label="Название"><div class="fam">' + (d.fam === "resolume" ? "Resolume" : "disguise") + "</div></td>" +
+      '<td class="mono">' + esc([d.gpu1, d.gpu2].filter(Boolean).join(" + ") || "—") + "</td>" +
+      '<td><input type="number" id="sCt' + i + '" min="0" max="99" value="' + d.count + '" aria-label="Количество"></td>' +
+      '<td><input type="number" id="sOut' + i + '" min="0" max="16" value="' + d.outs + '" aria-label="Выходов под контент"></td>' +
+      '<td class="num"><input type="number" id="sW' + i + '" min="16" max="8192" value="' + d.w + '" aria-label="Ширина"> × <input type="number" id="sH' + i + '" min="16" max="8192" value="' + d.h + '" aria-label="Высота"></td>' +
+      '<td class="note">' + esc(d.note || "") + "</td></tr>").join("") + "</tbody>";
+  inv.servers.forEach((d, i) => {
+    $("sOn" + i).onchange = (e) => { d.on = e.target.checked; saveInv(); };
+    $("sNm" + i).onchange = (e) => { d.name = e.target.value || d.name; saveInv(); };
+    $("sCt" + i).onchange = (e) => { d.count = Math.max(0, VC.pint(e.target.value, d.count)); saveInv(); };
+    $("sOut" + i).onchange = (e) => { d.outs = Math.max(0, VC.pint(e.target.value, d.outs)); saveInv(); };
+    $("sW" + i).onchange = (e) => { d.w = Math.max(16, VC.pint(e.target.value, d.w)); saveInv(); };
+    $("sH" + i).onchange = (e) => { d.h = Math.max(16, VC.pint(e.target.value, d.h)); saveInv(); };
+  });
+}
+function saveInv() { lsSet("vcalc.inv", inv); render(false); }
+
+/* расчёт и вывод */
+let last = null;
+function render(redrawInv = true) {
+  lsSet("vcalc.set", set);
+  syncSettings();
+  $("srvCustom").hidden = SRV_FMTS[set.srvFmt][1] > 0;
+  $("procCustom").hidden = PROC_FMTS[set.procFmt][1] > 0;
+  renderScreens();
+  if (redrawInv) renderInventory();
+  const srv = fmtOf(SRV_FMTS, set.srvFmt, set.srvW, set.srvH), proc = fmtOf(PROC_FMTS, set.procFmt, set.procW, set.procH);
+  const servers = inv.servers.filter((s) => set.fam === "all" || s.fam === set.fam);
+  const r = VC.calculate(project.items, { srv, proc, packSrv: set.packSrv, packProc: set.packProc, rotSrv: set.rotSrv, rotProc: set.rotProc }, { servers, procs: inv.procs });
+  last = { r, srv, proc };
+  renderSummary(r); renderUsage(r); renderItems(r, srv, proc); renderOuts(r);
+}
+
+function stat(title, need, have, unit, missing, extra) {
+  const cls = need === 0 ? "idle" : missing ? "bad" : "ok";
+  const pill = need === 0 ? "не нужны" : missing ? "не хватает " + missing : "хватает";
+  return '<div class="stat ' + cls + '"><h2>' + title + '</h2><div class="big">' + need + " <small>" + unit + " из " + have + '</small></div><span class="pill ' + cls + '">' + pill + "</span>" + (extra ? '<span class="hint">' + extra + "</span>" : "") + "</div>";
+}
+function renderSummary(r) {
+  const srvHave = r.srvUnits.reduce((s, u) => s + (u.dev.outs | 0), 0);
+  const srvBoxes = r.srvUnits.filter((u) => u.used.length).length;
+  const procHave = r.procUnits.reduce((s, u) => s + (u.dev.max2k | 0), 0);
+  const procBoxes = r.procUnits.filter((u) => u.used.length).length;
+  const n4 = r.procOuts.filter((o) => o.big).length;
+  $("summary").innerHTML =
+    stat("Выходы серверов", r.srvOuts.length, srvHave, "вых.", r.srvMissing, "серверов в работе: " + srvBoxes) +
+    stat("Выходы процессоров", r.procOuts.length, procHave, "вых. 2K", r.procMissing, "из них 4K: " + n4 + " · процессоров: " + procBoxes) +
+    '<div class="stat idle"><h2>Пикселей в ТЗ</h2><div class="big">' + (r.pixels / 1e6).toFixed(2) + ' <small>Мп</small></div><span class="hint">экранов: ' + r.active.length + "</span></div>";
+}
+function renderUsage(r) {
+  const rows = [];
+  const add = (u, cap, used, unit) => {
+    const pct = cap > 0 ? Math.min(100, used / cap * 100) : 0;
+    rows.push('<div class="u-row"><span class="nm" title="' + esc(u.dev.name) + '">' + esc(u.dev.name) + (u.dev.count > 1 ? " #" + u.idx : "") + '</span><div class="bar"><i class="' + (pct >= 99.9 ? "full" : "") + '" style="width:' + pct + '%"></i></div><span class="num">' + fmtN(used) + " / " + cap + unit + "</span></div>");
+  };
+  r.procUnits.filter((u) => u.used.length).forEach((u) => add(u, u.dev.max2k, u.dev.max2k - u.free, " 2K"));
+  r.srvUnits.filter((u) => u.used.length).forEach((u) => add(u, u.dev.outs, u.used.length, ""));
+  $("usage").innerHTML = rows.length ? rows.join("") : '<p class="hint">Отметьте хотя бы один экран.</p>';
+}
+const fmtN = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1));
+
+function diagram(it, outs, label) {
+  const mine = outs.filter((o) => o.keys.includes(it.key));
+  const W = it.w, H = it.h, pad = Math.max(W, H) * 0.01;
+  const fs = Math.max(W, H) / 26;
+  let g = "";
+  if (it.parts) it.parts.forEach((p) => { g += '<rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" fill="var(--panel)" stroke="var(--muted)" stroke-width="' + fs / 10 + '"/>'; });
+  else g += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--panel)" stroke="var(--muted)" stroke-width="' + fs / 10 + '"/>';
+  for (const o of mine) for (const p of o.items.filter((x) => x.key === it.key)) {
+    g += '<rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" fill="' + tone(o.n) + '" fill-opacity="0.28" stroke="' + tone(o.n) + '" stroke-width="' + fs / 7 + '"/>';
+    const t = Math.min(fs, p.h * 0.45, p.w * 0.3);
+    if (t > 0) g += '<text x="' + (p.x + p.w / 2) + '" y="' + (p.y + p.h / 2) + '" font-size="' + t + '" text-anchor="middle" dominant-baseline="central" fill="var(--ink)" font-weight="600">' + o.n + "</text>";
+  }
+  return '<div class="dg"><span class="cap">' + label + ": " + mine.length + " вых.</span>" +
+    '<svg viewBox="' + -pad + " " + -pad + " " + (W + 2 * pad) + " " + (H + 2 * pad) + '" role="img" aria-label="' + esc(it.name + ", " + label) + '">' + g + "</svg></div>";
+}
+function renderItems(r) {
+  const box = $("items");
+  if (!r.active.length) { box.innerHTML = '<p class="hint">Нет отмеченных экранов.</p>'; return; }
+  box.innerHTML = r.active.map((it) => '<div class="item"><div class="item-h"><h3>' + esc(it.name) + '</h3><span class="meta mono">' + it.w + "×" + it.h + "</span></div>" +
+    '<div class="diagrams">' + diagram(it, r.srvOuts, it.proj ? "Сервер · по проектору на выход" : "Сервер") +
+    (it.viaProc && !it.proj ? diagram(it, r.procOuts, "Процессор") : "") + "</div></div>").join("");
+}
+function outRows(outs, kind) {
+  return outs.map((o) => {
+    const where = o.at ? esc(o.at.dev) + (o.at.unit > 1 || countOf(o.at.dev, kind) > 1 ? " #" + o.at.unit : "") + " · выход " + o.at.port : '<span class="miss">не хватает</span>';
+    const what = o.items.map((p) => esc(p.name) + (p.label ? " " + p.label : "") + ' <span class="mono">' + p.w + "×" + p.h + " @ " + p.x + "," + p.y + "</span>").join("<br>");
+    const fmt = kind === "proc" ? (o.big ? "4K" : "2K") : "";
+    return '<tr><td class="num"><span class="sw" style="background:' + tone(o.n) + '"></span>' + (kind === "proc" ? "П" : "С") + o.n + "</td><td>" + where + '</td><td class="num mono">' + o.usedW + "×" + o.usedH + (o.rot ? " ↻" : "") + (fmt ? " · " + fmt : "") + "</td><td>" + what + "</td></tr>";
+  }).join("");
+}
+function countOf(name, kind) { const list = kind === "proc" ? inv.procs : inv.servers; const d = list.find((x) => x.name === name); return d ? d.count : 1; }
+function renderOuts(r) {
+  $("outs").innerHTML = "<thead><tr><th>№</th><th>Устройство</th><th>Занято</th><th>Что на выходе (кусок экрана @ x,y)</th></tr></thead><tbody>" +
+    (r.procOuts.length ? '<tr><td colspan="4"><h3>Процессоры → LED</h3></td></tr>' + outRows(r.procOuts, "proc") : "") +
+    (r.srvOuts.length ? '<tr><td colspan="4"><h3>Медиасерверы → процессоры</h3></td></tr>' + outRows(r.srvOuts, "srv") : "") + "</tbody>";
+}
+
+/* текст расчёта */
+function summaryText() {
+  const { r, srv, proc } = last;
+  const L = [];
+  L.push("Расчёт видеовыходов" + (project.name ? " — " + project.name : ""));
+  L.push("Экраны: " + r.active.map((it) => it.name + " " + it.w + "×" + it.h).join("; "));
+  L.push("Выход сервера " + srv.w + "×" + srv.h + ", процессора " + proc.w + "×" + proc.h);
+  L.push("");
+  L.push("Процессоры: " + r.procOuts.length + " вых." + (r.procMissing ? " (не хватает " + r.procMissing + ")" : ""));
+  r.procOuts.forEach((o) => L.push("  П" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
+  L.push("Серверы: " + r.srvOuts.length + " вых." + (r.srvMissing ? " (не хватает " + r.srvMissing + ")" : ""));
+  r.srvOuts.forEach((o) => L.push("  С" + o.n + " " + (o.at ? o.at.dev + " #" + o.at.unit + " вых." + o.at.port : "НЕ ХВАТАЕТ") + " — " + o.items.map((p) => p.name + (p.label ? " " + p.label : "") + " " + p.w + "×" + p.h + "@" + p.x + "," + p.y).join(", ")));
+  return L.join("\n");
+}
+let toastT = 0;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2600); }
+
+/* файлы */
+async function openFile(f) {
+  try {
+    const d = VC.parseProjectText(await f.text());
+    const p = VC.projectItems(d);
+    if (!p.items.length) throw new Error("в проекте нет экранов");
+    if (!p.name) p.name = f.name.replace(/\.(ledmask|json|plist)+$/i, "");
+    loadProject(p, false);
+    toast("Открыт проект: " + f.name);
+  } catch (e) { toast("Не удалось открыть проект: " + e.message); }
+}
+$("btnOpen").onclick = () => $("file").click();
+$("file").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) openFile(f); };
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("hot"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("hot"); }));
+drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+$("btnAdd").onclick = () => {
+  if (project.example) { project.items = []; project.example = false; project.name = ""; }
+  project.items.push({ key: "x:" + Date.now(), type: "manual", name: "экран " + (project.items.length + 1), w: 1920, h: 1080, on: true, viaProc: true });
+  render();
+};
+$("btnCopy").onclick = () => {
+  const txt = summaryText();
+  const fallback = () => { const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); toast("Расчёт скопирован"); } catch (e) { toast("Выделите текст и скопируйте вручную"); } ta.remove(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast("Расчёт скопирован"), fallback); else fallback();
+};
+$("invReset").onclick = () => { inv = clone(DEFAULT_INV); lsSet("vcalc.inv", inv); render(); toast("Парк по умолчанию"); };
+
+bindSettings();
+loadProject(sampleProject(), true);
+})();
+</script>
